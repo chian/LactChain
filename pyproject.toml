@@ -1,0 +1,29 @@
+# Build system requirements 
+[build-system]
+requires = ["setuptools >= 69.0"]
+build-backend = "setuptools.build_meta"
+
+# Project 
+[project]
+# TODO: test if 
+name = "lactchain"
+version = "0.1.0"
+description = "Language action chain optimized via reinforcement learning"
+requires-python = ">=3.11"
+
+# pin dependencies for now due to openai error 
+# check for compatabilities in the future
+dependencies = [
+  "langchain==0.1.16",
+  "pydantic==2.7.1",
+  "gymnasium==0.29.1",
+  "llama-cpp-python==0.2.64"
+]
+
+# project info
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+authors = [
+  {name = "Brian Hsu", email = "brianhsu636@gmail.com" } 
+  {name = "Nicholas Chia", email = "chia@anl.gov"}
+]

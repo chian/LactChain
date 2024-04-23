@@ -2,4 +2,6 @@ langchain==0.1.16
 pydantic==2.7.1
 gymnasium==0.29.1
 llama-cpp-python==0.2.64
-
+python-dotenv
+langchain-anthropic==0.1.11
+langchain-google-genai==1.0.2

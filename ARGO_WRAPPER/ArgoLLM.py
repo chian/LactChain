@@ -14,7 +14,7 @@ class ModelType(Enum):
 
 class ArgoLLM(LLM):
 
-    model_type: ModelType = ModelType.GPT35
+    model_type: ModelType = ModelType.GPT4
     url: str = "https://apps-dev.inside.anl.gov/argoapi/api/v1/resource/chat/"
     temperature: Optional[float] = 0.8
     system: Optional[str]
@@ -117,3 +117,13 @@ class ArgoEmbeddingWrapper():
 
     def embed_query(self, query):
         return self.invoke(query)[0]
+    
+
+if __name__=="__main__": 
+
+    agent=ArgoLLM()
+    result=agent.invoke('Hello how are you doing today?')
+
+    print('Finished Test for ArgoLLM')
+
+

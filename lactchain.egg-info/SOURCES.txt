@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+lactchain.egg-info/PKG-INFO
+lactchain.egg-info/SOURCES.txt
+lactchain.egg-info/dependency_links.txt
+lactchain.egg-info/requires.txt
+lactchain.egg-info/top_level.txt

@@ -3,13 +3,18 @@
 requires = ["setuptools >= 69.0"]
 build-backend = "setuptools.build_meta"
 
+# Specify package name
+[tool.setuptools]
+packages=['lactchain']
+
+
 # Project 
 [project]
 # TODO: test if 
 name = "lactchain"
 version = "0.1.0"
 description = "Language action chain optimized via reinforcement learning"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 
 # pin dependencies for now due to openai error 
 # check for compatabilities in the future
@@ -20,13 +25,14 @@ dependencies = [
   "llama-cpp-python==0.2.64", 
   "python-dotenv", 
   "langchain-anthropic==0.1.11",
-  "langchain-google-genai==1.0.2"
+  "langchain-google-genai==1.0.2", 
+  "vllm==0.4.0.post1"
 ]
 
 # project info
 readme = "README.md"
 license = {file = "LICENSE.txt"}
 authors = [
-  {name = "Brian Hsu", email = "brianhsu636@gmail.com" } 
+  {name = "Brian Hsu", email = "brianhsu636@gmail.com" }, 
   {name = "Nicholas Chia", email = "chia@anl.gov"}
 ]

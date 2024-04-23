@@ -3,6 +3,3 @@ pydantic==2.7.1
 gymnasium==0.29.1
 llama-cpp-python==0.2.64
 
-
-CMAKE_ARGS="-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_APPLE_SILICON_PROCESSOR=arm64 -DLLAMA_METAL=on" pip install --upgrade --verbose --force-reinstall --no-cache-dir llama-cpp-python
-# link: https://github.com/abetlen/llama-cpp-python/issues/847#issuecomment-1869266853

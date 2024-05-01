@@ -1,37 +1,41 @@
-import gymnasium as gym
-from gymnasium import spaces
+from abc import ABC, abstractmethod
 
-class AbstractEnvironment(gym.Env):
+class AbstractEnvironment(ABC):
     """
-    This abstract class represents the template for creating custom environments.
-    It defines the basic structure and required methods.
+    Abstract class for creating custom environments for reinforcement learning or other simulations.
+    This class defines the basic structure and required methods that must be implemented by any concrete subclass.
     """
     def __init__(self):
-        super(AbstractEnvironment, self).__init__()
-        # Define action and observation spaces
-        self.action_space = None
-        self.observation_space = None
+        super().__init__()
+        self.action_space = None  # Define in subclass
+        self.observation_space = None  # Define in subclass
 
+    @abstractmethod
     def step(self, action):
         """
-        Apply the action and return the new state, reward, done, and info.
-        """
-        raise NotImplementedError
-
-    def reset(self):
-        """
-        Reset the environment to an initial state and return the initial observation.
-        """
-        raise NotImplementedError
-
-    def render(self, mode='human'):
-        """
-        Render the environment.
+        Apply the action to the environment and return the resulting state, reward, and done status.
+        
+        Parameters:
+            action: An action to be applied in the environment.
+        
+        Returns:
+            tuple: Contains the new state, the reward for the action, and a boolean indicating if the episode is complete.
         """
         pass
 
+    @abstractmethod
+    def reset(self):
+        """
+        Reset the environment to an initial state and return the initial observation.
+        
+        Returns:
+            initial_state: The state of the environment at the start of a new episode.
+        """
+        pass
+
+    @abstractmethod
     def close(self):
         """
-        Perform any necessary cleanup.
+        Perform any necessary cleanup at the end of an environment's life cycle.
         """
         pass

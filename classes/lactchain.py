@@ -30,33 +30,59 @@
 #         self.add_component(SubChain())  # SubChain as a component
 #         self.add_component(AnotherComponent())  # Another component that follows the subchain
 
-class Context:
+from abc import ABC, abstractmethod
+
+class Context(ABC):
+    """
+    Abstract base class for context management in a LactChain.
+    """
     def __init__(self):
         self.data = {}
 
+    @abstractmethod
     def update(self, key, value):
-        self.data[key] = value
+        """
+        Update the context with a key-value pair.
+        """
+        pass
 
+    @abstractmethod
     def get(self, key, default=None):
-        return self.data.get(key, default)
+        """
+        Retrieve a value from the context by key, with an optional default.
+        """
+        pass
 
-class Component:
+class Component(ABC):
+    """
+    Abstract base class for components in a LactChain.
+    """
+    @abstractmethod
     def execute(self, context):
         """
         Execute the component logic using the shared context.
         """
-        raise NotImplementedError("Each component must implement its own execution logic.")
+        pass
 
-class LactChain:
+class LactChain(ABC):
+    """
+    Abstract base class for a language action chain (LactChain).
+    """
     def __init__(self):
         self.components = []
 
     def add_component(self, component):
-        assert isinstance(component, Component), "All components must inherit from Component"
+        """
+        Add a component to the chain. Ensures that the component is an instance of Component.
+        """
+        if not isinstance(component, Component):
+            raise TypeError("All components must be instances of Component")
         self.components.append(component)
 
     def execute(self, context):
+        """
+        Execute the chain of components on the given context.
+        """
         for component in self.components:
             component.execute(context)
         return context
-

@@ -1,52 +1,62 @@
+#This set of classes allows for heirarchical passing of language chains into execution chains
+
+#Example:
+# 2 components make up a SubChain in the below and then the MainChain can be composed of SubChains.
+
+# class LLMCallComponent(Component):
+#     def execute(self, context):
+#         # Example LLM call modifying the context
+#         context['state'] += " after LLM call"
+#         context['llm_output'] = "example output"
+
+# class ParseOutputComponent(Component):
+#     def execute(self, context):
+#         if 'llm_output' in context:
+#             context['state'] += " parsed from " + context['llm_output']
+
+# class SubChain(LactChain):
+#     def __init__(self):
+#         super().__init__()
+#         self.add_component(LLMCallComponent())
+#         self.add_component(ParseOutputComponent())
+
+#     def execute(self, context):
+#         super().execute(context)
+#         context['state'] += " with final modifications in subchain"
+
+# class MainChain(LactChain):
+#     def __init__(self):
+#         super().__init__()
+#         self.add_component(SubChain())  # SubChain as a component
+#         self.add_component(AnotherComponent())  # Another component that follows the subchain
+
+class Context:
+    def __init__(self):
+        self.data = {}
+
+    def update(self, key, value):
+        self.data[key] = value
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+class Component:
+    def execute(self, context):
+        """
+        Execute the component logic using the shared context.
+        """
+        raise NotImplementedError("Each component must implement its own execution logic.")
+
 class LactChain:
-    """
-    LactChain class.
-    """
-    def __init__(self, state: State):
-        self.state = state
+    def __init__(self):
+        self.components = []
 
-    def transition(self, action, *args, **kwargs):
-        """
-        I asked GPT4 to help me code this as a base class that will later
-        be specified by the user. I think the answer is hard code them
-        yourself later.
+    def add_component(self, component):
+        assert isinstance(component, Component), "All components must inherit from Component"
+        self.components.append(component)
 
-        Transition the state based on an action or set of actions that
-        define the language action chain. Implement this method in subclasses
-        to specify the behavior of your LactChain. This method should take an
-        action, apply it to the current state, and return the new state.
-        
-        Parameters:
-        - action: The action to be applied. This could be a function or any
-                  other callable that takes the current state (and optionally
-                  other arguments) and returns a new state.
-        - *args, **kwargs: Additional arguments and keyword arguments that
-                           might be needed for the action.
-        
-        Returns:
-        - A new state resulting from applying the action to the current state.
-        
-        Example:
-        ```
-        def my_action(state, *args, **kwargs):
-            # Modify the state or compute a new state
-            new_state = ...
-            return new_state
-        
-        # In a subclass of LactChain
-        def transition(self, action, *args, **kwargs):
-            return action(self.state, *args, **kwargs)
-        ```
-        """
-        raise NotImplementedError("This method should be implemented by subclasses.")
-
-    # Specify individual actions to be used in the language action chain.
-    # Do this in subclasses built from this class.
-    # These can be CoT, agent calls, prompt mutations, etc.
-    # If prompts are stored in the state for later use (i.e., your action is
-    # just to mutate a prompt) then you can update the state dictionary 
-    # (which does not modify the embedding) and return a state with the same
-    # embedding (but with dictionary modified).
-
-    # Does this class need any other methods?
+    def execute(self, context):
+        for component in self.components:
+            component.execute(context)
+        return context
 

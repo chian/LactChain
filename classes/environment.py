@@ -9,7 +9,7 @@ class AbstractEnvironment(gym.Env):
     def __init__(self):
         super(AbstractEnvironment, self).__init__()
         # Define action and observation spaces
-        self.lactchain_space = None
+        self.action_space = None
         self.observation_space = None
 
     def step(self, action):

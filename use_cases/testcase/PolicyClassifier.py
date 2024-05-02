@@ -19,12 +19,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.optim import Adam
+import matplotlib.pyplot as plt
+import pandas as pd
 
 class PolicyNetwork(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(PolicyNetwork, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.fc2 = nn.Linear(128, output_dim)
+        self.output_dim = output_dim
+        self.fc1 = nn.Linear(input_dim, 16)
+        self.fc2 = nn.Linear(16, output_dim)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -37,17 +40,22 @@ class PolicyNetworkLearningScheme(LearningScheme):
         self.optimizer = Adam(self.policy_network.parameters(), lr=learning_rate)
 
     def update_model(self, state, action, reward, next_state, done):
-        state = torch.tensor(state, dtype=torch.float32)
-        next_state = torch.tensor(next_state, dtype=torch.float32)
+        state = torch.tensor([state.attributes['x'], state.attributes['y'], state.attributes['orientation']], dtype=torch.float32)
+        next_state = torch.tensor([next_state.attributes['x'], next_state.attributes['y'], next_state.attributes['orientation']], dtype=torch.float32)
         action = torch.tensor([action], dtype=torch.int64)
         reward = torch.tensor([reward], dtype=torch.float32)
-        done = torch.tensor([done], dtype=torch.float32)
 
         # Get current Q values
-        current_q_values = self.policy_network(state).gather(1, action.unsqueeze(-1)).squeeze(-1)
+        current_q_values = self.policy_network(state)
+        if current_q_values.ndim == 1:
+            current_q_values = current_q_values.unsqueeze(0)  # Add a batch dimension if necessary
+        current_q_values = current_q_values.gather(1, action.unsqueeze(-1)).squeeze(-1)
 
-        # Compute the expected Q values
-        next_q_values = self.policy_network(next_state).max(1)[0]
+         # Compute the expected Q values
+        next_q_values = self.policy_network(next_state)
+        if next_q_values.ndim == 1:
+            next_q_values = next_q_values.unsqueeze(0)  # Add a batch dimension if necessary
+        next_q_values = next_q_values.max(1)[0]
         expected_q_values = reward + (0.99 * next_q_values * (1 - done))
 
         # Compute loss
@@ -63,12 +71,36 @@ class PolicyNetworkLearningScheme(LearningScheme):
 
     def load_model(self, filepath):
         self.policy_network.load_state_dict(torch.load(filepath))
+
+class QLearningAgent(AbstractRLAgent):
+    def __init__(self, input_dim, output_dim, learning_rate=0.005, epsilon=1.0, epsilon_decay=0.999999, min_epsilon=0.1):
+        self.epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.min_epsilon = min_epsilon
+        self.policy_network = PolicyNetwork(input_dim, output_dim)
+        self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=learning_rate)
+        self.learning_scheme = PolicyNetworkLearningScheme(self.policy_network)
+
+    def select_action(self, state):
+           if np.random.rand() < self.epsilon:
+               action = np.random.choice(self.policy_network.output_dim)
+           else:
+               position = torch.tensor([state.attributes['x'], state.attributes['y'], state.attributes['orientation']], dtype=torch.float32)
+               with torch.no_grad():
+                   action_probs = self.policy_network(position)
+               action = torch.argmax(action_probs).item()
+           return action
     
+    def learn(self, state, action, reward, next_state, done):
+        self.learning_scheme.update_model(state, action, reward, next_state, done)
+        self.epsilon = max(self.epsilon * self.epsilon_decay, self.min_epsilon)
+
 class SimpleEnvironment(AbstractEnvironment):
     def __init__(self, grid_size=4):
         self.grid_size = grid_size
         # Initialize with State instances using InputDict for positions
         self.current_state = State(attributes=InputDict({'x': 0, 'y': 0, 'orientation': 0}))
+        self.lact_chains = []
 
     def reset(self):
         self.current_state.attributes['x'] = 0  # Reset position within the existing State instance
@@ -84,12 +116,29 @@ class SimpleEnvironment(AbstractEnvironment):
         # Define actions as 0: up, 1: right, 2: down, 3: left
         action = lact_chain.determine_action(self.current_state)
 
-        # Update position within the existing State instance
-        self.current_state.attributes['x'] = 0  # Reset position within the existing State instance
-        self.current_state.attributes['y'] = 0
+        # Proposed new position based on the action
+        new_x = self.current_state.attributes['x']
+        new_y = self.current_state.attributes['y']
+
+        if action == 0:  # up
+            new_y -= 1
+        elif action == 1:  # right
+            new_x += 1
+        elif action == 2:  # down
+            new_y += 1
+        elif action == 3:  # left
+            new_x -= 1
+
+        # Enforce boundary conditions
+        new_x = max(0, min(new_x, self.grid_size - 1))
+        new_y = max(0, min(new_y, self.grid_size - 1))
+
+        # Update the state with the new valid position
+        self.current_state.attributes['x'] = new_x
+        self.current_state.attributes['y'] = new_y
 
         reward = -1  # Penalize each move to encourage shortest path
-        done = self.goal_criteria  # Check if goal is reached
+        done = self.goal_criteria()  # Check if goal is reached
         if done:
             reward = 100  # Reward for reaching the goal
         return self.current_state, reward, done
@@ -103,18 +152,6 @@ class SimpleEnvironment(AbstractEnvironment):
     def close(self):
     # Add any necessary cleanup code here
         pass
-
-class QLearningAgent(AbstractRLAgent):
-    def __init__(self, input_dim, output_dim, learning_rate=0.01):
-        self.policy_network = PolicyNetwork(input_dim, output_dim)
-        self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=learning_rate)
-
-    def select_action(self, state):
-        state = torch.tensor(state.get_position(), dtype=torch.float32)  # Assuming State has a method to get position
-        with torch.no_grad():
-            action_probs = self.policy_network(state)
-        action = torch.multinomial(action_probs, 1).item()
-        return action
 
 class LactChainA(LactChain):
     def __init__(self):
@@ -133,7 +170,6 @@ class LactChainB(LactChain):
     def __init__(self):
         super().__init__()
         self.add_component(ComponentB())
-        self.add_component(ComponentA())
 
     def determine_action(self, current_state):
         orientation = current_state.attributes['orientation']
@@ -172,18 +208,59 @@ class ComponentB(Component):
         print("Turning left")
         context.update('action', 'turn left')
 
-def train():
-    env = SimpleEnvironment()
-    agent = QLearningAgent(input_dim=10, output_dim=2)  # Assuming two actions
+def train(agent, env, num_episodes=1000):
+    """
+    Train a reinforcement learning agent in a given environment.
 
-    for episode in range(1000):
+    Args:
+        agent: The agent to be trained, which must have select_action and learn methods.
+        env: The environment in which the agent operates, must have reset and step methods.
+        num_episodes: The number of episodes to train the agent for.
+    """
+    max_steps_per_episode = 20
+    rewards = []
+
+    for episode in range(num_episodes):
         state = env.reset()
         done = False
-        while not done:
+        total_reward = 0
+        steps = 0
+
+        while not done and steps < max_steps_per_episode:
             action = agent.select_action(state)
-            next_state, reward, done = env.step(action)
+            next_state, reward, done = env.step(env.lact_chains[action])
             agent.learn(state, action, reward, next_state, done)
             state = next_state
+            total_reward += reward
+            #print(f"Step {steps + 1}: Action taken = {action}: Position = {state.attributes['x'], state.attributes['y']}")
+            steps += 1
+        rewards.append(total_reward)
+        print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+
+    # Calculate rolling average of the rewards
+    window_size = 50  # Define the size of the window for the rolling average
+    # Convert the list of rewards to a pandas Series
+    print("Length of rewards:",len(rewards))
+    rolling_avg = np.convolve(rewards, np.ones(window_size)/window_size, mode='valid')
+
+    # Correct the x-axis values for the rolling average plot
+    x_values = np.arange(window_size - 1, num_episodes)
+
+    print("Length of Rolling Average:",len(rolling_avg),"\nLength of X Values:",len(x_values))
+    #print(rolling_avg)
+
+    # Plotting the rewards and the rolling average
+    plt.figure(figsize=(10, 5))
+    #plt.plot(rewards, label='Total Reward per Episode', alpha=0.5)  # Slightly transparent
+    plt.plot(x_values, rolling_avg, label='Rolling Average', color='red')  # Rolling average line
+    plt.xlabel('Episode')
+    plt.ylabel('Total Reward')
+    plt.title('Rewards Over Time During Training')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+    return rewards
+
 
 if __name__ == "__main__":
     #Test of LactChain class
@@ -207,7 +284,13 @@ if __name__ == "__main__":
     env.step(lact_chain_a)
     env.step(lact_chain_b)
     print("Final State after actions:", env.get_current_state().attributes)
+    env.close()
 
-
-    #train()
-
+    #Test of LearningScheme on Gridworld
+    env = SimpleEnvironment(grid_size=3)
+    env.lact_chains = [LactChainA(), LactChainB()]
+    action_space_size = len(env.lact_chains)
+    agent = QLearningAgent(input_dim=3, output_dim=action_space_size)
+    print("Action Space:", action_space_size)
+    rewards = train(agent, env, num_episodes=100000)
+    

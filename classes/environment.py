@@ -7,8 +7,8 @@ class AbstractEnvironment(ABC):
     """
     def __init__(self):
         super().__init__()
-        self.action_space = None  # Define in subclass
-        self.observation_space = None  # Define in subclass
+        self.action_space = None  # Define as list of lactchains
+        self.observation_space = None  # What variables are relevant to the agent
 
     @abstractmethod
     def step(self, action):
@@ -37,5 +37,15 @@ class AbstractEnvironment(ABC):
     def close(self):
         """
         Perform any necessary cleanup at the end of an environment's life cycle.
+        """
+        pass
+
+    @abstractmethod
+    def goal_criteria(self):
+        """
+        Determine if the goal of the environment has been reached.
+        
+        Returns:
+            bool: True if the goal has been reached, otherwise False.
         """
         pass

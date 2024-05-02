@@ -4,31 +4,34 @@
 # part of the state object itself. This is useful for tracking information that is not
 # directly related to the state of the system, but is needed for the state transition function
 # and operates in a non-hard coded way.
-class InputDict:
+class InputDict(dict):
     """
-    A simple dictionary-like class that allows attributes to be set and accessed using dictionary keys.
+    A dictionary-like class that allows attributes to be set and accessed using dictionary keys,
+    now inheriting from the built-in dict class to fully support dictionary operations.
     """
     def __init__(self, iterable=(), **kwargs):
-        self.__dict__.update(iterable, **kwargs)
+        super().__init__(iterable, **kwargs)
 
     def __getitem__(self, key):
-        return self.__dict__.get(key)
+        return super().get(key)
 
     def __setitem__(self, key, value):
-        self.__dict__[key] = value
+        super().__setitem__(key, value)
 
     def __repr__(self):
-        return str(self.__dict__)
+        return super().__repr__()
 
-class State(InputDict):
+class State:
     """
     This class defines the state operations, assuming the state will be an LLM embedded block of text.
     It extends InputDict to utilize a flexible attribute setting and accessing mechanism.
     """
-    def __init__(self, iterable=(), **kwargs):
-        self.embedding_model = kwargs.pop('embedding_model', None)
-        self.textblock = kwargs.pop('textblock', None)
-        super().__init__(iterable, **kwargs)
+    def __init__(self, attributes=None, embedding_model=None, textblock=None):
+        self.embedding_model = embedding_model
+        self.textblock = textblock
+        if not isinstance(attributes, InputDict):
+            raise TypeError("attributes must be an instance of InputDict")
+        self.attributes = attributes
         self.embedding = None
 
     def __call__(self):

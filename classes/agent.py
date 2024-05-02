@@ -19,16 +19,8 @@ class AbstractRLAgent(ABC):
         """
         pass
 
-    @abstractmethod
-    def learn(self, state, action, reward, next_state, done):
+def learn(self, state, action, reward, next_state, done):
         """
-        Update the agent's knowledge or model based on the experience.
-        
-        Parameters:
-            state: The current state from the environment.
-            action: The action taken by the agent.
-            reward: The reward received after taking the action.
-            next_state: The state of the environment after the action is taken.
-            done: A boolean flag indicating whether the episode has ended.
+        Delegate the learning process to the learning scheme.
         """
-        pass
+        self.learning_scheme.update_model(state, action, reward, next_state, done)

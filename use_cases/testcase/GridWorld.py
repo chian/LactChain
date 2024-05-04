@@ -95,12 +95,24 @@ class QLearningAgent(AbstractRLAgent):
         self.learning_scheme.update_model(state, action, reward, next_state, done)
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.min_epsilon)
 
+class SimpleGridRewardFunction(AbstractRewardFunction):
+    def __init__(self, goal_position=(2, 2)):
+        self.goal_position = goal_position
+
+    def compute_reward(self, next_state):
+        # Check if the goal is reached
+        if next_state.attributes['x'] == 2 and next_state.attributes['y'] == 2:  # Assuming goal is at (2,2)
+            return 100  # Reward for reaching the goal
+        else:
+            return -1  # Penalize each move to encourage shortest path
+
 class SimpleEnvironment(AbstractEnvironment):
     def __init__(self, grid_size=4):
         self.grid_size = grid_size
         # Initialize with State instances using InputDict for positions
         self.current_state = State(attributes=InputDict({'x': 0, 'y': 0, 'orientation': 0}))
         self.lact_chains = []
+        self.reward_function = SimpleGridRewardFunction((self.grid_size-1, self.grid_size-1))  # Initialize the reward function
 
     def reset(self):
         self.current_state.attributes['x'] = 0  # Reset position within the existing State instance
@@ -113,21 +125,32 @@ class SimpleEnvironment(AbstractEnvironment):
         return x == self.grid_size - 1 and y == self.grid_size - 1
 
     def step(self, lact_chain):
-        # Define actions as 0: up, 1: right, 2: down, 3: left
-        action = lact_chain.determine_action(self.current_state)
+        # Get the current orientation and position
+        current_orientation = self.current_state.attributes['orientation']
+        x, y = self.current_state.attributes['x'], self.current_state.attributes['y']
+        context = HistoryContext()
 
-        # Proposed new position based on the action
-        new_x = self.current_state.attributes['x']
-        new_y = self.current_state.attributes['y']
+        # Determine the action based on the lact_chain
+        action = lact_chain.execute(context)
+        #print("Action:", context.get()[0])
 
-        if action == 0:  # up
-            new_y -= 1
-        elif action == 1:  # right
-            new_x += 1
-        elif action == 2:  # down
-            new_y += 1
-        elif action == 3:  # left
-            new_x -= 1
+        new_x = x
+        new_y = y
+
+        # Define movement based on orientation
+        if action.get()[0] == 'move forward':
+            if current_orientation == 0:  # facing up
+                new_y = y - 1
+            elif current_orientation == 1:  # facing right
+                new_x = x + 1
+            elif current_orientation == 2:  # facing down
+                new_y = y + 1
+            elif current_orientation == 3:  # facing left
+                new_x = x - 1
+        elif action.get()[0] == 'turn left':
+            new_orientation = (current_orientation - 1) % 4
+            self.current_state.attributes['orientation'] = new_orientation
+            new_x, new_y = x, y  # No movement, just turn
 
         # Enforce boundary conditions
         new_x = max(0, min(new_x, self.grid_size - 1))
@@ -137,10 +160,10 @@ class SimpleEnvironment(AbstractEnvironment):
         self.current_state.attributes['x'] = new_x
         self.current_state.attributes['y'] = new_y
 
-        reward = -1  # Penalize each move to encourage shortest path
-        done = self.goal_criteria()  # Check if goal is reached
-        if done:
-            reward = 100  # Reward for reaching the goal
+        # Use the reward function to compute the reward
+        reward = self.reward_function.compute_reward(self.current_state)
+        done = self.goal_criteria()  # Check if goal is reached based on next_state
+
         return self.current_state, reward, done
 
     def get_current_state(self):
@@ -158,27 +181,10 @@ class LactChainA(LactChain):
         super().__init__()
         self.add_component(ComponentA())
 
-    def determine_action(self, current_state):
-        # Assuming current_state includes 'orientation' and 'x', 'y' coordinates
-        orientation = current_state.attributes['orientation']
-        # Mapping of orientation to action codes: 0: up, 1: right, 2: down, 3: left
-        action_map = {0: 0, 1: 1, 2: 2, 3: 3}
-        # Example: if orientation is 1 (facing right), "move forward" translates to moving right
-        return action_map[orientation]
-
 class LactChainB(LactChain):
     def __init__(self):
         super().__init__()
         self.add_component(ComponentB())
-
-    def determine_action(self, current_state):
-        orientation = current_state.attributes['orientation']
-        # Let's assume this chain sometimes wants to turn left before moving forward
-        # Rotate left (decrease orientation by 1, wrap around using % 4)
-        new_orientation = (orientation - 1) % 4
-        current_state.attributes['orientation'] = new_orientation
-        action_map = {0: 0, 1: 1, 2: 2, 3: 3}
-        return action_map[new_orientation]
 
 class HistoryContext(Context):
     def __init__(self):
@@ -199,13 +205,13 @@ class HistoryContext(Context):
 class ComponentA(Component):
     def execute(self, context):
         # Logic for "Move forward"
-        print("Moving forward")
+        #print("Moving forward")
         context.update('action', 'move forward')
 
 class ComponentB(Component):
     def execute(self, context):
         # Logic for "Turn left"
-        print("Turning left")
+        #print("Turning left")
         context.update('action', 'turn left')
 
 def train(agent, env, num_episodes=1000):
@@ -292,5 +298,5 @@ if __name__ == "__main__":
     action_space_size = len(env.lact_chains)
     agent = QLearningAgent(input_dim=3, output_dim=action_space_size)
     print("Action Space:", action_space_size)
-    rewards = train(agent, env, num_episodes=100000)
+    rewards = train(agent, env, num_episodes=1000000)
     

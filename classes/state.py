@@ -29,6 +29,8 @@ class State:
     def __init__(self, attributes=None, embedding_model=None, textblock=None):
         self.embedding_model = embedding_model
         self.textblock = textblock
+        if attributes is None:
+            attributes = InputDict()
         if not isinstance(attributes, InputDict):
             raise TypeError("attributes must be an instance of InputDict")
         self.attributes = attributes

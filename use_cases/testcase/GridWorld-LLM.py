@@ -4,15 +4,12 @@ import sys
 print("Python Path:", sys.path)
 sys.path.append('/Users/chia/Documents/ANL/Software/LactChain/')
 
-from classes.agent import AbstractRLAgent
 from classes.environment import AbstractEnvironment
 from classes.learning import LearningScheme
 from classes.reward import AbstractRewardFunction
 from classes.lactchain import LactChain, Component, Context
 from classes.state import State, InputDict
-from ARGO_WRAPPER.ArgoLLM import ArgoLLM
-from ARGO_WRAPPER.CustomLLM import ARGO_EMBEDDING
-from ARGO_WRAPPER.ARGO import ArgoWrapper, ArgoEmbeddingWrapper
+
 
 import torch
 import torch.nn as nn
@@ -22,109 +19,246 @@ from torch.optim import Adam
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from llama_cpp import Llama
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from textwrap import dedent
 
-class Phi3LLM:
+from ollama import Client
+from langchain_community.llms import Ollama
+from pydantic import BaseModel
+from typing import List
+from langchain.output_parsers import PydanticOutputParser
+from langchain.schema import OutputParserException
+
+from peft import get_peft_model, LoraConfig, get_peft_config
+from transformers import TrainingArguments, Trainer, AutoModel, AutoTokenizer
+
+class LlamaClientWrapper:
     def __init__(self):
-        self.model_name = "microsoft/Phi-3-mini-128k-instruct"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            device_map="mps",  # Assuming CUDA is available
-            torch_dtype=torch.float32,
-            trust_remote_code=True
-        )
-        self.pipe = pipeline(
-            "text-generation",
-            model=self.model,
-            tokenizer=self.tokenizer
-        )
+        self.client = Client(host='http://localhost:11434')
 
     def invoke(self, prompt):
-        messages = [{"role": "user", "content": prompt}]
-        generation_args = {
-            "max_new_tokens": 256,  # Adjust token limit as needed
-            "return_full_text": False,
-            "temperature": 0.0,
-            "do_sample": False
-        }
-        output = self.pipe(messages, **generation_args)
-        return output[0]['generated_text']
+        response = self.client.chat(model='llama3', messages=[{'role': 'user', 'content': prompt}])
+        return response['message']['content']
 
-class PolicyNetwork(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(PolicyNetwork, self).__init__()
-        self.output_dim = output_dim
-        self.fc1 = nn.Linear(input_dim, 16)
-        self.fc2 = nn.Linear(16, output_dim)
+class ValueFunction(nn.Module):
+    def __init__(self, model_name="meta-llama/Llama-2-7b-chat-hf"):
+        super(ValueFunction, self).__init__()
+        #ADD LORA CONFIG HERE
+        self.bb_config = None
+        self.use_qlora = False
+        self.lora_config = LoraConfig(
+            r=8,
+            lora_alpha=32,
+            # target modules varies from model to model
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="SEQ_CLS"
+        )
+        self.printer = True
+        self.max_seq_length = 128
+        self.model_name = model_name
+        self.tokenizer_name = "LlamaTokenizer"
+        
+        # Load the model        
+        if self.use_qlora:
+            from peft import prepare_model_for_kbit_training
+            from transformers import BitsAndBytesConfig
+            bb_config = BitsAndBytesConfig(
+                load_in_8_bit=True,
+            )
+        if self.printer:
+            print('Loading model:', self.model_name)
+        self.base_model = AutoModel.from_pretrained(
+            self.model_name,
+            torch_dtype=torch.float32,
+            #attn_implementation="flash_attention_2",
+            #quantization_config=bb_config
+        )
+        if self.use_qlora:
+            if self.printer:
+                print('Preparing model for PEFT training')
+            self.model = prepare_model_for_kbit_training(self.base_model, self.lora_config)
+            if self.printer:
+                print('Model prepared for PEFT training')
+        # Use PEFT, if requested
+        if self.lora_config is not None:
+            if self.printer:
+                print('setting up peft!')
+            #peft_config = get_peft_config(self.peft_config)
+            self.model = get_peft_model(self.base_model, self.lora_config)
+            if self.printer:
+                self.model.print_trainable_parameters()
+        if self.printer:
+            print('Model:', self.model)
+        self.q_value_head = nn.Linear(self.model.config.hidden_size, 1)
+        
+        # Load the tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        #tokenizer = transformers.PreTrainedTokenizerFast.from_pretrained(self.tokenizer_name,)
+        # Set the model max length for proper truncation;
+        # for mistral, 32k is too long and causes OOM failures
+        self.tokenizer.model_max_length = min(self.model.config.max_position_embeddings,
+                                        self.max_seq_length)
+        # Set the pad token if it is not set
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = '[PAD]'
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.softmax(self.fc2(x), dim=-1)
-        return x
+    def forward(self, input_ids, attention_mask=None):
+        outputs = self.model(input_ids, attention_mask=attention_mask)
+        last_hidden_states = outputs.last_hidden_state
+        q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
+        predicted_q_value = q_values.mean()  # Take the mean of the first logit
+        return predicted_q_value
+
+class ValueFunctionLearningScheme(LearningScheme):
+    def __init__(self, model):
+        self.model = model
+        self.trainer = None
+        self.training_args = TrainingArguments(
+            output_dir="./model_output",
+            num_train_epochs=1,  # Set to 1 for episodic training
+            per_device_train_batch_size=16,
+            learning_rate=1e-5,  # Adjusted for PEFT
+            logging_dir='./logs',
+            logging_steps=10,
+        ) 
+
+    def update_model(self, train_dataset):
+        self.trainer = Trainer(
+            model=self.model,
+            args=self.training_args,
+            train_dataset=train_dataset,
+            compute_loss=self.compute_loss
+        )
+        self.trainer.train()
+
+    def compute_loss(self,batch):
+        # Use the precomputed predicted Q-values from the dataset
+        predicted_q_values = batch['predicted_q_value']
+
+        # Extract the target Q-values from the batch
+        target_q_values = batch['target_q_value']
+
+        # Compute the mean squared error loss
+        loss = torch.nn.functional.mse_loss(predicted_q_values, target_q_values)
+        return loss
     
-class PolicyNetworkLearningScheme(LearningScheme):
-    def __init__(self, policy_network, learning_rate=0.01):
-        self.policy_network = policy_network
-        self.optimizer = Adam(self.policy_network.parameters(), lr=learning_rate)
-
-    def update_model(self, state, action, reward, next_state, done):
-        state = torch.tensor([state.attributes['x'], state.attributes['y'], state.attributes['orientation']], dtype=torch.float32)
-        next_state = torch.tensor([next_state.attributes['x'], next_state.attributes['y'], next_state.attributes['orientation']], dtype=torch.float32)
-        action = torch.tensor([action], dtype=torch.int64)
-        reward = torch.tensor([reward], dtype=torch.float32)
-
-        # Get current Q values
-        current_q_values = self.policy_network(state)
-        if current_q_values.ndim == 1:
-            current_q_values = current_q_values.unsqueeze(0)  # Add a batch dimension if necessary
-        current_q_values = current_q_values.gather(1, action.unsqueeze(-1)).squeeze(-1)
-
-         # Compute the expected Q values
-        next_q_values = self.policy_network(next_state)
-        if next_q_values.ndim == 1:
-            next_q_values = next_q_values.unsqueeze(0)  # Add a batch dimension if necessary
-        next_q_values = next_q_values.max(1)[0]
-        expected_q_values = reward + (0.99 * next_q_values * (1 - done))
-
-        # Compute loss
-        loss = F.smooth_l1_loss(current_q_values, expected_q_values)
-
-        # Optimize the model
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
     def save_model(self, filepath):
-        torch.save(self.policy_network.state_dict(), filepath)
+        torch.save(self.model.state_dict(), filepath)
 
     def load_model(self, filepath):
-        self.policy_network.load_state_dict(torch.load(filepath))
+        self.model.load_state_dict(torch.load(filepath))
 
-class QLearningAgent(AbstractRLAgent):
-    def __init__(self, input_dim, output_dim, learning_rate=0.005, epsilon=1.0, epsilon_decay=0.999999, min_epsilon=0.1):
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.min_epsilon = min_epsilon
-        self.policy_network = PolicyNetwork(input_dim, output_dim)
-        self.optimizer = torch.optim.Adam(self.policy_network.parameters(), lr=learning_rate)
-        self.learning_scheme = PolicyNetworkLearningScheme(self.policy_network)
+class QLearningDataset(torch.utils.data.Dataset):
+    def __init__(self, model, env, num_samples, gamma=0.99):
+        self.model = model
+        self.env = env
+        self.gamma = gamma
+        self.states = []
+        self.actions = []
+        self.next_states = []
+        self.dones = []
+        self.target_q_values = []
+        self.max_steps = 10
+        #getting target and predicted q-values, respectively
+        self.sample_experience(num_samples)
+        self.predicted_q_values = self.get_predicted_q_values()  # Compute predicted Q-values for all states
 
-    def select_action(self, state):
-           if np.random.rand() < self.epsilon:
-               action = np.random.choice(self.policy_network.output_dim)
-           else:
-               position = torch.tensor([state.attributes['x'], state.attributes['y'], state.attributes['orientation']], dtype=torch.float32)
-               with torch.no_grad():
-                   action_probs = self.policy_network(position)
-               action = torch.argmax(action_probs).item()
-           return action
+    def sample_experience(self, num_samples):
+        for _ in range(num_samples):
+            state = self.env.reset()  # Start a new episode
+            done = False
+            steps = 0
+            while not done:
+                action = self.env.lact_chains[0].propose_action()  # Get action from the environment's LactChain
+                next_state, reward, done = self.env.step(action)  # Execute the action
+
+                self.states.append(state)
+                self.actions.append(action)
+                self.next_states.append(next_state)
+                self.dones.append(done)
+
+                # Compute target Q-value for this transition
+                target_q_value = self.compute_target_q_value(next_state, reward, done)
+                self.target_q_values.append(target_q_value)
+
+                state = next_state  # Move to the next state
+                steps += 1
+                if steps > self.max_steps:
+                    done = True
+
+    def compute_target_q_value(self, next_state, reward, done):
+        if done:
+            return reward
+        else:
+            self.model.eval()
+            with torch.no_grad():
+                # Predict Q-values for the next state
+                next_state_tensor = next_state.to_tensor().unsqueeze(0)
+                next_state_q_values = self.model(next_state_tensor)
+                max_next_q_value = torch.max(next_state_q_values).item()
+            self.model.train()
+            return reward + self.gamma * max_next_q_value
+
+    def get_predicted_q_values(self):
+        self.model.eval()
+        with torch.no_grad():
+            states_tensor = torch.stack([torch.tensor(state, dtype=torch.float32) for state in self.states])
+            predicted_q_values = self.model(states_tensor)
+        self.model.train()
+        return predicted_q_values
     
-    def learn(self, state, action, reward, next_state, done):
-        self.learning_scheme.update_model(state, action, reward, next_state, done)
-        self.epsilon = max(self.epsilon * self.epsilon_decay, self.min_epsilon)
+    def __len__(self):
+        return len(self.states)
+
+    def __getitem__(self, idx):
+        return {
+            'state': torch.tensor(self.states[idx], dtype=torch.float32),
+            'action': torch.tensor(self.actions[idx], dtype=torch.long),
+            'next_state': torch.tensor(self.next_states[idx], dtype=torch.float32),
+            'done': torch.tensor(self.dones[idx], dtype=torch.bool),
+            'predicted_q_value': self.predicted_q_values[idx], 
+            'target_q_value': torch.tensor(self.target_q_values[idx], dtype=torch.float32)
+        }
+
+class QLearning:
+    def __init__(self, model, env, num_samples):
+        self.model = model
+        self.env = env
+        self.learning_scheme = ValueFunctionLearningScheme(self.model)
+        self.datasets = []  # List to store multiple datasets
+        self.update_dataset(num_samples)  # Initialize with the first dataset
+        self.rewards = []  # Store rewards for each episode
+
+    def update_dataset(self, num_samples):
+        # Create a new dataset with the specified number of samples
+        new_dataset = QLearningDataset(self.model, self.env, num_samples)
+        self.datasets = [new_dataset]
+
+    def learn(self):
+        # Update the model using the training dataset
+        self.learning_scheme.update_model(self.dataset)
+
+    def plot_rewards(self, window_size=50):
+        if len(self.rewards) < window_size:
+            print("Not enough data to plot.")
+            return
+
+        # Calculate rolling average of the rewards
+        rolling_avg = np.convolve(self.rewards, np.ones(window_size) / window_size, mode='valid')
+
+        # Correct the x-axis values for the rolling average plot
+        x_values = np.arange(window_size - 1, len(self.rewards))
+
+        # Plotting the rewards and the rolling average
+        plt.figure(figsize=(10, 5))
+        plt.plot(x_values, rolling_avg, label='Rolling Average', color='red')  # Rolling average line
+        plt.xlabel('Episode')
+        plt.ylabel('Total Reward')
+        plt.title('Rewards Over Time During Training')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
 class SimpleGridRewardFunction(AbstractRewardFunction):
     def __init__(self, goal_position=(2, 2)):
@@ -164,7 +298,7 @@ class SimpleEnvironment(AbstractEnvironment):
 
         # Iterate through each action in the action_choice list
         for action in action_choice:
-            action_type = action.get()[0]  # Assuming action.get() returns a list with the action type as the first element
+            action_type = action  # Assuming action.get() returns a list with the action type as the first element
 
             # Define movement based on orientation and action type
             if action_type == 'move forward':
@@ -176,15 +310,9 @@ class SimpleEnvironment(AbstractEnvironment):
                     new_y += 1
                 elif current_orientation == 3:  # facing left
                     new_x -= 1
-                action.add_feedback('that worked!')
             elif action_type == 'turn left':
                 current_orientation = (current_orientation - 1) % 4
                 self.current_state.attributes['orientation'] = current_orientation
-                # No movement, just turn
-                action.add_feedback('that worked!')
-            else:
-                action.add_feedback('that did not work!')
-
             # Enforce boundary conditions after each action
             new_x = max(0, min(new_x, self.grid_size - 1))
             new_y = max(0, min(new_y, self.grid_size - 1))
@@ -209,146 +337,110 @@ class SimpleEnvironment(AbstractEnvironment):
     # Add any necessary cleanup code here
         pass
 
+class State:
+    def __init__(self, attributes):
+        self.attributes = attributes
+
+    def to_tensor(self):
+        return torch.tensor([self.attributes['x'], self.attributes['y'], self.attributes['orientation']], dtype=torch.float32)
+
 class LactChainA(LactChain):
-    def __init__(self,llm, context):
+    def __init__(self,llm):
         super().__init__()
-        self.add_component(new_action(llm))
+        self.strategy_component = self.create_strategy(llm)
+        self.add_component(self.strategy_component)
+        self.message = ""
+        self.converted_strategy_component = self.convert_strategy(llm)
+        self.add_component(self.converted_strategy_component)
+        self.action_choices = []
+
     def add_feedback(self,message):
         context.update('feedback', message)
+
     def add_action(self, action):
         context.update('action_choices', action)
 
-class HistoryContext(Context):
-    def __init__(self):
-        super().__init__()
-        self.feedback = []
-        self.action_choices = []
-    def update(self, key, value):
-        # Update the context with a key-value pair
-        super().update(key, value)
-        # Append the action to the history list if it's an action update
-        if key == 'feedback':
-            self.feedback.append(value)
-        if key == 'action_choices':
-            self.action_choices.append(value)
-    def get(self, key):
-        # Return the history based on the key
-        if key in self.__dict__:
-            return self.__dict__[key]
-        else:
-            raise KeyError(f"No such key '{key}' in context.")
-
-class new_action(Component):
-    def __init__(self,llm):
-        self.llm = llm
-        self.move_prompt = dedent("""\
-            You are in gridworld. Make a move. Your response should be short and directed. 
-            Answer: """)
-        self.convert_prompt_template = dedent("""\
-            There are only 2 types of moves you can make:
-            
-                1. move forward
-                2. turn left
-            
-            Come up with a combination of those two moves in order
-            to successfully carry out the action: {action}
-            
-            Your final answer should be in the format of a python list 
-            of moves, where each move is one of the 2 types listed above.
-            E.g. ['move forward', 'turn left']
-            Answer: """)
-    def execute(self, context):
-        # Retrieve the last feedback from context, or use a default value if none is available
-        # This didn't work very well - feedback mechanism needs to be rethought
-        #past_feedback = context.get() if context.get() else "no feedback, first move"
+    def create_strategy(self,llm):
+    
+        class declare_strategy(Component):
+            def __init__(self,llm):
+                self.llm = llm
+                self.move_prompt = dedent("""\
+                    You are in gridworld. Make a move to help you reach the goal. 
+                    Your response must be some kind of move, even if you have to guess. 
+                    """)
+            def execute(self,context=None):
+                # Retrieve the last feedback from context, or use a default value if none is available
+                # This didn't work very well - feedback mechanism needs to be rethought
         
-        move_response = self.llm.invoke(self.move_prompt)
-        print("Move Response:", move_response)
+                move_response = self.llm.invoke(self.move_prompt)
+                print("Move Response:", move_response)
+                self.message = move_response
 
-        # Fill in the placeholder in the prompt template
-        prompt = self.convert_prompt_template.format(action=move_response)
-        print("Prompt:", prompt)
+        return declare_strategy(llm)
 
-        # LLM responds to prompt with instructions on how to move
-        response = self.llm.invoke(prompt)
-        print("Response from new_action:", response)
+    def convert_strategy(self,llm):
+        outer_message = self.message
 
-        # To do - make this agenticChunking - add action to list of possible actions
-        # Policy can choose old actions or to make new actions
-        context.update('action', response)
-        
-def train(agent, env, num_episodes=1000):
-    """
-    Train a reinforcement learning agent in a given environment.
+        class ListOfMoves(BaseModel):
+            moves: List[str]
 
-    Args:
-        agent: The agent to be trained, which must have select_action and learn methods.
-        env: The environment in which the agent operates, must have reset and step methods.
-        num_episodes: The number of episodes to train the agent for.
-    """
-    max_steps_per_episode = 20
-    rewards = []
-    context = HistoryContext()
-    context.update('action_choices', [LactChainA()])
+        class convert_strategy_to_action(Component):
+            def __init__(self,llm,parent):
+                self.llm = llm
+                self.parent = parent
+                self.convert_prompt_template = dedent("""\
+                    There are only 2 types of moves you can make:
+            
+                    1. move forward
+                    2. turn left
+            
+                Come up with a combination of those two moves in order
+                to successfully carry out the action: {strategy}
+            
+                Your final answer should be in the format of a python list 
+                of moves, where each move is one of the 2 types listed above.
+                E.g. ['move forward', 'turn left']
+                """)
+                # Fill in the placeholder in the prompt template
+                self.prompt = self.convert_prompt_template.format(strategy=outer_message)
 
-    for episode in range(num_episodes):
-        state = env.reset()
-        done = False
-        total_reward = 0
-        steps = 0
+            def execute(self,context=None):
+                print("Response from convert_strategy:", self.prompt)
+                pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
+                format_instructions = pydantic_parser.get_format_instructions()
 
-        while not done and steps < max_steps_per_episode:
-            action = agent.select_action(state)
-            next_state, reward, done = env.step(context.get('action_choices')[action])
-            agent.learn(state, action, reward, next_state, done)
-            state = next_state
-            total_reward += reward
-            #print(f"Step {steps + 1}: Action taken = {action}: Position = {state.attributes['x'], state.attributes['y']}")
-            steps += 1
-        rewards.append(total_reward)
-        print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+                #print("Prompt:", prompt)
+                prompt_with_instructions = f"{self.prompt}\n\nFormat instructions: {format_instructions}"
 
-    # Calculate rolling average of the rewards
-    window_size = 50  # Define the size of the window for the rolling average
-    # Convert the list of rewards to a pandas Series
-    print("Length of rewards:",len(rewards))
-    rolling_avg = np.convolve(rewards, np.ones(window_size)/window_size, mode='valid')
+                # LLM responds to prompt with instructions on how to move
+                response = self.llm.invoke(prompt_with_instructions)
+                #print("Response:", response)
 
-    # Correct the x-axis values for the rolling average plot
-    x_values = np.arange(window_size - 1, num_episodes)
+                try:
+                    # Parse the LLM response into the Pydantic model
+                    parsed_response = pydantic_parser.parse(response)
+                    print("Parsed Moves:", parsed_response.moves)
+                    # Add the parsed moves to the action_choices list in the outer class
+                    self.parent.action_choices.append(parsed_response.moves)
+                except OutputParserException as e:
+                    print("Failed to parse response:", e)
 
-    print("Length of Rolling Average:",len(rolling_avg),"\nLength of X Values:",len(x_values))
-    #print(rolling_avg)
-
-    # Plotting the rewards and the rolling average
-    plt.figure(figsize=(10, 5))
-    #plt.plot(rewards, label='Total Reward per Episode', alpha=0.5)  # Slightly transparent
-    plt.plot(x_values, rolling_avg, label='Rolling Average', color='red')  # Rolling average line
-    plt.xlabel('Episode')
-    plt.ylabel('Total Reward')
-    plt.title('Rewards Over Time During Training')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-    return rewards
-
+        return convert_strategy_to_action(llm,self)
+    
+    def propose_action(self):
+        #propose_action should create a new action_choices list entry by calling create_strategy and convert_strategy
+        self.create_strategy(llm)
+        self.convert_strategy(llm)
+        return self.action_choices #[-1] removed for testing
 
 if __name__ == "__main__":
     # Example usage
-    #torch.set_default_device("mps")
-    phi3_llm = Phi3LLM()
+    #llama_client = LlamaClientWrapper()
+    """ llm = Ollama(model="llama3")
     prompt = "Translate the following English text to French: | Hello, how are you?"
-    response = phi3_llm.invoke(prompt)
-    print("Response from Phi-3 LLM:", response)
-
-    #Test of LactChain class
-    context = HistoryContext()
-    lact_chain = LactChainA(llm=phi3_llm,context=context)
-    for i in range(1):
-        context = lact_chain.execute(context)
-        print("Context - action_choices:",context.get('action_choices'))
-
-    exit(0)
+    response = llm.invoke(prompt)
+    print("Response from Llama Client:", response)
 
     #Test of State
     attributes = InputDict({'x': 0, 'y': 0})
@@ -357,21 +449,31 @@ if __name__ == "__main__":
     print("State Dict:", state.attributes)
 
     #Test of Environment class
-    env = SimpleEnvironment(grid_size=5,context=context)
+    env = SimpleEnvironment(grid_size=4)
     initial_state = env.reset()
     print("Initial State:", initial_state)
-    lact_chain_a = LactChainA()
-    lact_chain_b = LactChainB()
-    env.step(lact_chain_a)
-    env.step(lact_chain_b)
+    #lact_chain either makes an action or gets it from context['action_choices']
+    lact_chain = LactChainA(llm=llm)
+    lact_chain.execute()
+    print("Action Choices 1:",lact_chain.action_choices)
+    lact_chain.execute()
+    print("Action Choices 2:",lact_chain.action_choices)
+    print(lact_chain.action_choices[0])
+    env.step(lact_chain.action_choices[0])
+    env.step(lact_chain.action_choices[0])
     print("Final State after actions:", env.get_current_state().attributes)
     env.close()
-
+ """
     #Test of LearningScheme on Gridworld
+    llm = Ollama(model="llama3")
     env = SimpleEnvironment(grid_size=3)
-    env.lact_chains = [LactChainA(), LactChainB()]
-    action_space_size = len(env.lact_chains)
-    agent = QLearningAgent(input_dim=3, output_dim=action_space_size)
-    print("Action Space:", action_space_size)
-    rewards = train(agent, env, num_episodes=1000000)
+    env.lact_chains = [LactChainA(llm=llm)]
+    val_func = ValueFunction(model_name="mistralai/Mistral-7B-Instruct-v0.2")
+    print(val_func.model)
+    qlearning = QLearning(model=val_func.model, env=env, num_samples=4)
+    for _ in range(10):
+        qlearning.learn()
+        qlearning.update_dataset(4)
+    qlearning.plot_rewards()
+    exit(0)
     

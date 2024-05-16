@@ -4,7 +4,6 @@ import sys
 print("Python Path:", sys.path)
 sys.path.append('/Users/chia/Documents/ANL/Software/LactChain/')
 
-from classes.agent import AbstractRLAgent
 from classes.environment import AbstractEnvironment
 from classes.learning import LearningScheme
 from classes.reward import AbstractRewardFunction
@@ -72,7 +71,7 @@ class PolicyNetworkLearningScheme(LearningScheme):
     def load_model(self, filepath):
         self.policy_network.load_state_dict(torch.load(filepath))
 
-class QLearningAgent(AbstractRLAgent):
+class QLearningAgent:
     def __init__(self, input_dim, output_dim, learning_rate=0.005, epsilon=1.0, epsilon_decay=0.999999, min_epsilon=0.1):
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay

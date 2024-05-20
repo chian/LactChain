@@ -58,7 +58,7 @@ class Component(ABC):
     Abstract base class for components in a LactChain.
     """
     @abstractmethod
-    def execute(self, context):
+    def execute(self, context=None):
         """
         Execute the component logic using the shared context.
         """
@@ -79,7 +79,7 @@ class LactChain(ABC):
             raise TypeError("All components must be instances of Component")
         self.components.append(component)
 
-    def execute(self, context):
+    def execute(self, context=None):
         """
         Execute the chain of components on the given context.
         """

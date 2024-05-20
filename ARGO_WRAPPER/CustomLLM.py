@@ -11,7 +11,7 @@ from llama_cpp.llama_grammar import LlamaGrammar
 
 # The ARGO_LLM class. Uses the _invoke_model helper function.
 # It implements the _call function.
-
+from pydantic import BaseModel, validator
 
 class ARGO_LLM(LLM):
 

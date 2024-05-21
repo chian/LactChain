@@ -40,49 +40,23 @@ class ReplayMemory:
         return f'Deque Max Capacity: {len(self.transitions)}, First item: {self.transitions[0]}, Last item: {self.transitions[-1]}'
 
 class Model(BaseModel): 
-    hidden1:int=Field(
-        512
-    )
-    hidden2:int=Field(
-        256
-    )
-    hidden3:int=Field(
-        128
-    )
-    activation:str=Field(
-        'ReLU'
-    )
+    hidden1:int=Field(512)
+    hidden2:int=Field(256)
+    hidden3:int=Field(128)
+    activation:str=Field('ReLU')
 
 class Learn(BaseModel): 
-    batch_size:int=Field(
-        128
-    )
-    gamma:float=Field(
-        0.99
-    )
-    eps_start:float=Field(
-        0.9
-    )
-    eps_end:float=Field(
-        0.05
-    )
-    eps_decay:float=Field(
-        1000
-    )
-    tau:float=Field(
-        0.005
-    )
-    lr:float=Field(
-        1e-4
-    )
+    batch_size:int=Field(128)
+    gamma:float=Field(0.99)
+    eps_start:float=Field(0.9)
+    eps_end:float=Field(0.05)
+    eps_decay:float=Field(1000)
+    tau:float=Field(0.005)
+    lr:float=Field(1e-4)
 
 class BaseConfig(BaseModel): 
-    modelcfg:Model=Field(
-        default_factory=Model
-    )
-    learncfg:Learn=Field(
-        default_factory=Learn
-    )
+    modelcfg:Model=Field(default_factory=Model)
+    learncfg:Learn=Field(default_factory=Learn)
 
 class DQN(nn.Module): 
     def __init__(self, n_obs:int, n_actions:int, config:BaseConfig): 

@@ -2,7 +2,7 @@ import torch, torch.nn as nn, torch.nn.functional as F
 import gymnasium as gym 
 import copy 
 from collections import deque
-from typing import Tuple, Any, List
+from typing import Tuple, Any, List, Dict
 from torch import Tensor
 from torch.distributions.bernoulli import Bernoulli
 from torch.distributions.categorical import Categorical
@@ -25,15 +25,31 @@ class Memory():
     def __getitem__(self, idx:int) -> Any:
         return self.buffer[idx]
 
+class Transforms(object): 
+    def __init__(self, transforms:Any=None):
+        self.transforms=None 
+
+    def __call__(self, observation:Dict[str, Any]) -> Tensor: 
+        out=torch.tensor(observation['image']).type(torch.float32).permute(2, 0, 1)
+        return out
+
 class QNetwork(nn.Module): 
     def __init__(self, 
                  num_blocks:int, 
+                 in_channels:int, 
+                 out_channels:int,
+                 kernel_size:int,
                  input_size:int, 
                  hidden_size:int, 
                  output_size:int, 
-                 dropout:float
+                 dropout:float, 
+                 **kwargs
                  ): 
         super().__init__()
+        self.conv1=nn.Conv2d(in_channels, out_channels, kernel_size)
+        self.pool1=nn.MaxPool2d(kernel_size)
+        _input_size=int(in_channels*out_channels*kernel_size)
+
         layer1=nn.Linear(input_size, hidden_size)
         layer2=nn.Linear(hidden_size, output_size)
         act=nn.GELU()
@@ -41,8 +57,16 @@ class QNetwork(nn.Module):
         block=nn.Sequential(layer1, act, drop, layer2, act)
 
         self.encoder=nn.ModuleList([block for _ in range(num_blocks)])
+
+        self.transform=Transforms()
     
-    def forward(self, x:Tensor) -> Tensor: 
+    def forward(self, x:Dict[str, Any]) -> Tensor: 
+        x = self.transform(x) # just grab the image
+
+        x = self.conv1(x)
+        x = self.pool1(x)
+        x = x.flatten().unsqueeze(0)
+        
         _x = x
         for block in self.encoder: 
             x = block(x)
@@ -91,7 +115,6 @@ class Agent(object):
         return None
     
 
-
 def train(env_name:str): 
 
     env=gym.make(env_name)
@@ -102,6 +125,26 @@ def train(env_name:str):
 
 if __name__=="__main__": 
 
+    env=gym.make("MiniGrid-Empty-5x5-v0")
+
+    observation, info = env.reset(seed=42)
+
+    transforms=Transforms()
+    tensor=transforms(observation)
+
+    conv1=nn.Conv2d(3, 10, 2)
+    pool1=nn.MaxPool2d(3)
+
+    breakpoint()
+
+    net=QNetwork(1, 512, 50, 10, 0.1)
+
+    breakpoint()
+
+    out=net(observation)
+
+
+    breakpoint()
 
 
     # net=QNetwork(3, 512, 50, 10, 0.1)
@@ -113,13 +156,13 @@ if __name__=="__main__":
     B = 5
     n = 10
 
-    out=torch.randn((B, n))
-    binary_tensor=torch.tensor([1, 0, 1, 0])
-    mask=torch.tensor()
-    breakpoint()
-    indices = torch.arange(n).expand(B, n)
-    random_indices = torch.randint(0, n, (B, n))
-    final_indices = torch.where(binary_tensor.view(-1, 1).expand(B, n).bool(), indices, random_indices)
+    # out=torch.randn((B, n))
+    # binary_tensor=torch.tensor([1, 0, 1, 0])
+    # mask=torch.tensor()
+    # breakpoint()
+    # indices = torch.arange(n).expand(B, n)
+    # random_indices = torch.randint(0, n, (B, n))
+    # final_indices = torch.where(binary_tensor.view(-1, 1).expand(B, n).bool(), indices, random_indices)
 
     breakpoint()
 

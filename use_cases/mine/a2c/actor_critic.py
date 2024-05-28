@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain')
 from use_cases.mine.a2c.poolers import get_pooler, average_pool, last_token_pool
 from use_cases.mine.a2c.configs import CriticConfig, ActorConfig
+from use_cases.mine.custom_environment import SimpleEnvironment, SimpleGridRewardFunction
 
 '''
 =============
@@ -32,14 +33,54 @@ Environment: grid world, but outputs rewards in the form of strings
 - Output is state of the agent encoded as a string to feed into critic and actor
 '''
 
-STRATEGY_PROMPT='''
-You are an AGI that lives in grid-world.
+STRATEGY_PROMPT=f'''
+You are a smart navigator that lives in grid-world. Your goal is to help me explore
+navigate grid-world and get to the green square in the least amount of steps: 
 
+At each round of conversation, I can give you:
+
+State: 
+// This is the current state of the environment you are in. //
+
+Previous Move: 
+// This is the previous action that you have committed. //
+
+Reward: 
+// This is the reward you received from your previous move and the previous move you did. //
+
+You must provide me with the following: 
+Action:
+// This is a single action that you can choose from in json format. You must return it as {{action}} and nothing more. //
+
+Below are actions you can choose from: 
+======================================
+0           left            Turn Left 
+1           right           Turn Right
+2           forward         Move Forward
+3           pickup          Unused
+4           drop            Unused
+5           toggle          Unused
+6           done            Unused
+'''
+
+ACTOR_INPUT='''
+State: 
+{state}
+
+Previous Move: 
+{action}
+
+Reward: 
+{reward}
 '''
 
 CRITIC_PROMPT='''
-
 '''
+
+ENVIRONMENTS={
+    'minigrid-empty':"MiniGrid-Empty-5x5-v0",
+}
+
 
 
 class Actor(nn.Module): 
@@ -74,12 +115,24 @@ class Actor(nn.Module):
 
 if __name__=="__main__": 
 
-    # env=gym.make('')
+    env=SimpleEnvironment()
+
+    
+
+    observation = env.reset()
+
+    env=gym.make("MiniGrid-Empty-5x5-v0")
+    obs, info = env.reset()
+
+    action=env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
 
     actorconfig=ActorConfig()
     actor=Actor(actorconfig)
 
-    decoded, outputs=actor('hello how are you doing?')
+    output_text=actor(STRATEGY_PROMPT + ACTOR_INPUT.format({'state':None, 
+                                                            'action':None, 
+                                                            'reward':None}))
 
     print('DONE')
 

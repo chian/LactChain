@@ -2,7 +2,7 @@ import os
 print("Current Working Directory:", os.getcwd())
 import sys
 print("Python Path:", sys.path)
-sys.path.append('/Users/chia/Documents/ANL/Software/LactChain/')
+sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 
 from classes.environment import AbstractEnvironment
 from classes.learning import LearningScheme
@@ -469,6 +469,7 @@ if __name__ == "__main__":
     env = SimpleEnvironment(grid_size=3)
     env.lact_chains = [LactChainA(llm=llm)]
     val_func = ValueFunction(model_name="mistralai/Mistral-7B-Instruct-v0.2")
+    breakpoint()
     print(val_func.model)
     qlearning = QLearning(model=val_func.model, env=env, num_samples=4)
     for _ in range(10):

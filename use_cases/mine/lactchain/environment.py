@@ -37,7 +37,8 @@ class GridEnvironment(gym.Env):
                 'y':self.state['y'], 
                 'orientation':self.state['orientation']}
     
-    def step(self, action_sequence:List[str]) -> Tuple[Tuple[int], int, bool]:
+    def step(self, action_sequence:List[str]) -> Tuple[Dict[str, int], int, List[int], bool]:
+        rewards=[]
         total_reward = 0
         done = False
 
@@ -46,8 +47,9 @@ class GridEnvironment(gym.Env):
                 break
             self.state, reward, done = self._process_action(action)
             total_reward += reward
+            rewards.append(reward)
 
-        return self._get_obs(), total_reward, done
+        return self._get_obs(), total_reward, rewards, done
     
     def _process_action(self, action_command:str) -> Tuple[Tuple[int], int, bool]:
         assert action_command in ['move forward', 'turn left'], \
@@ -94,9 +96,20 @@ class GridEnvironment(gym.Env):
     
 
 if __name__=="__main__": 
+    sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+    from use_cases.mine.lactchain.dataset import QLearningDataset
+
+    cum_rewards=[]
+    policy_losses=[]
+    critic_losses=[]
 
     env=GridEnvironment()
     obs = env.reset()
     action_seq=['turn left', 'turn left', 'move forward', 'move forward', 'move forward', 'move forward']
-    obs = env.step(action_seq)
+    obs, tot_reward, rewards, done = env.step(action_seq)
+
+    
+
+    values=[1, 1, 1, 1, 1]
+    
     breakpoint()

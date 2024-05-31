@@ -2,7 +2,7 @@ import os
 print("Current Working Directory:", os.getcwd())
 import sys
 print("Python Path:", sys.path)
-sys.path.append('/Users/chia/Documents/ANL/Software/LactChain/')
+sys.path.append('/lus/eagle/projects/FoundEpidem/bhsu/2024_research/LactChain/')
 
 from classes.environment import AbstractEnvironment
 from classes.learning import LearningScheme
@@ -298,4 +298,4 @@ if __name__ == "__main__":
     agent = QLearningAgent(input_dim=3, output_dim=action_space_size)
     print("Action Space:", action_space_size)
     rewards = train(agent, env, num_episodes=1000000)
-    
+    breakpoint()

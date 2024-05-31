@@ -1,0 +1,12 @@
+torch 
+torchvision 
+torchaudio
+langchain
+pydantic
+gymnasium
+transformers
+datasets
+numpy 
+peft
+langchain-community
+langchain-google-genai

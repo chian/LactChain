@@ -38,7 +38,6 @@ class GridEnvironment(gym.Env):
                 'orientation':self.state['orientation']}
     
     def step(self, action_sequence:List[str]) -> Tuple[Dict[str, int], int, List[int], bool]:
-        rewards=[]
         total_reward = 0
         done = False
 
@@ -47,9 +46,8 @@ class GridEnvironment(gym.Env):
                 break
             self.state, reward, done = self._process_action(action)
             total_reward += reward
-            rewards.append(reward)
 
-        return self._get_obs(), total_reward, rewards, done
+        return self._get_obs(), total_reward, done
     
     def _process_action(self, action_command:str) -> Tuple[Tuple[int], int, bool]:
         assert action_command in ['move forward', 'turn left'], \

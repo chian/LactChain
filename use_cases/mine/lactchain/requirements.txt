@@ -10,3 +10,4 @@ numpy
 peft
 langchain-community
 langchain-google-genai
+langchain-anthropic

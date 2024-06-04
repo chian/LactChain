@@ -87,7 +87,7 @@ class HuggingFaceGenerator:
         import torch
         from transformers import AutoTokenizer
         from transformers import AutoModelForCausalLM
-        
+
         model_kwargs = {'device_map':'auto'}
 
         # Use quantization
@@ -234,156 +234,9 @@ class HuggingFaceGenerator:
 
 
 if __name__=="__main__": 
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    import torch
-    from textwrap import dedent
-    from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
-    from transformers import pipeline
-    from langchain_core.prompts import PromptTemplate
-    MODEL="mistralai/Mistral-7B-Instruct-v0.3"
-    model = AutoModelForCausalLM.from_pretrained(MODEL, 
-                                                 device_map='auto', 
-                                                #  attn_implementation="flash_attention_2", 
-                                                 torch_dtype=torch.bfloat16
-                                                 )
-    tokenizer = AutoTokenizer.from_pretrained(MODEL)
-    chatbot = pipeline("text-generation", model=model, 
-                        tokenizer=tokenizer, device_map='auto', max_new_tokens=1000)
-    hf = HuggingFacePipeline(pipeline=chatbot)
-
-    template="""{question}"""
-    prompt = PromptTemplate.from_template(template)
-
-    # chain = prompt | hf
-    # question = "Can you write a short novel for me?"
-    # output=chain.invoke({"question": question})
-
-    breakpoint()
-
-    # gpu_chain = prompt | hf.bind(stop=["\n\n"])
-
-    gpu_chain=prompt | hf
-
-    questions=['Give me a summary on how cancer develops in humans', 'User:\nwrite me a short story\nAI:']
-
-    answers = gpu_chain.batch(questions)
-    input_lengths=[len(question) for question in questions]
-    answers_processed=[answer[input_length:] for answer, input_length in zip(answers, input_lengths)]
-
-    breakpoint()
-
-
-
-
-
-    messages = [
-        {"role": "system", "content": "You are a pirate chatbot who always responds in pirate speak!"},
-        # {"role": "user", "content": "Who are you?"},
-    ]
-    from transformers import pipeline
-    MODEL="mistralai/Mistral-7B-Instruct-v0.3"
-    model = AutoModelForCausalLM.from_pretrained(MODEL, device_map='auto')
-    tokenizer = AutoTokenizer.from_pretrained(MODEL)
-    chatbot = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=1000)
-    output=chatbot(messages)
-
-    breakpoint()
-
-    from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
-    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-
-    model_id = "microsoft/phi-2"
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id, device_map='auto')
-    pipe = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=1000)
-    hf = HuggingFacePipeline(pipeline=pipe)
-
-    from langchain_core.prompts import PromptTemplate
-
-    # template = dedent("""Question: {question}
-
-    # Answer: Let's think step by step.""")
-
-    template="""{question}"""
-    prompt = PromptTemplate.from_template(template)
-
-    chain = prompt | hf
-
-    question = "What is electroencephalography?"
-
-    output=chain.invoke({"question": question})
-
-    breakpoint()
-
-
-    tokenizer=AutoTokenizer.from_pretrained('microsoft/phi-2')
-    tokenizer.pad_token=tokenizer.eos_token
-    model=AutoModelForCausalLM.from_pretrained('microsoft/phi-2', 
-                                               trust_remote_code=True, 
-                                               device_map='auto')
-
-    device = torch.device(
-                'cuda' if torch.cuda.is_available() else 'cpu',
-            )
-    batch_encoding=tokenizer(
-                list_prompts,
-                padding='longest',
-                return_tensors='pt',
-            ).to(device)
-    
-    generated_text = model.generate(
-    **batch_encoding,
-    top_p=0.95,
-    num_return_sequences=1,
-    num_beams=10,
-    do_sample=True)
-
-    outputs=tokenizer.batch_decode(generated_text)
-    outputs_skip=tokenizer.batch_decode(generated_text)
-
-
-
-    breakpoint()
-
-    dict_prompts = [
-    {"role": "user", "content": "Hello how are you doing?"},
-    {"role": "user", "content": "Can you write a poem for me?"}
-    ]
-
-    chat_tokenizer=AutoTokenizer.from_pretrained('microsoft/Phi-3-mini-4k-instruct')
-    chat_batch_encoding=chat_tokenizer.apply_chat_template(dict_prompts,
-                                                            padding='longest',
-                                                            return_tensors='pt',
-                                                            return_dict=True
-                                                            )
-
-    # batch_encoding = tokenizer.apply_chat_template(
-    # prompts,
-    # add_generation_prompt=True,
-    # return_tensors="pt",
-    # padding='longest'
-    # )
-
-    # batch_encoding=Tokenizer.apply_chat_template(
-    #     prompts, 
-    #     add_generation
-    # )
-
-    breakpoint()
-
-    other_prompts=[
-        'hello how are you doing', 
-        'write me a poem'
-    ]
-
-    llama_tokenizer=AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
-    llama_tokenizer.pad_token=llama_tokenizer.eos_token
-    llama_batch_encoding=llama_tokenizer(
-                other_prompts,
-                padding='longest',
-                return_tensors='pt',
-            )
-
-    breakpoint()
     ...
+
+
+
+
 

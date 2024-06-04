@@ -18,6 +18,7 @@ from use_cases.mine.lactchain.config import BaseConfig
 from use_cases.mine.lactchain.langchain_backend import LangChainGenerator, GeneratorConfig
 from use_cases.mine.lactchain.vllm_backend import VLLMGenerator, VLLMGeneratorConfig
 from use_cases.mine.lactchain.huggingface_backend import HuggingFaceGenerator, HuggingFaceGeneratorConfig
+from use_cases.mine.lactchain.my_huggingface_backend import MyHuggingFaceGenerator
 ############################################################################
 
 class PolicyConfig(BaseConfig): 
@@ -62,22 +63,24 @@ PROMPT_TEMPLATE=dedent("""\
 class Strategy(object): 
     def __init__(self, 
                  prompt_template:str, 
-                 strategy_prompt:str, 
+                 strategy:str, 
                  ): 
-        self.strategy_prompt=strategy_prompt
+        self.strategy=strategy
         self.prompt_template=prompt_template
 
     @staticmethod
     def show_state(state:Dict[str, Any]): 
         pp.print(state)
+
+    def __call__(self, state:Dict[str, Any]) -> str:
+        '''formats final prompt from state input from env and strategy declaration'''
+        final_prompt=self.prompt_template.format(strategy=self.strategy, position=state)
+        return final_prompt
     
-    def compile_policy_prompt(self, state:Dict[str, Any], strategy:str) -> str: 
-        strategy=self.prompt_template.format(strategy=strategy, position=state)
-        return strategy
-    
-    def modify_strategy_prompt(self, new_strategy_prompt:str) -> str:
-        self.strategy_prompt=new_strategy_prompt
-        return f'New strategy prompt is:\n{self.new_strategy}'
+    def modify_strategy_prompt(self, new_strategy:str) -> str:
+        '''modify the strategy input'''
+        self.strategy=new_strategy
+        return f'New strategy prompt is:\n{self.strategy}'
 
 '''Idea: have the strategy be a learnable prefix token you append in the prompt'''
 
@@ -85,18 +88,18 @@ class MyLactChain(nn.Module):
     def __init__(self,
                  config:PolicyConfig,
                  prompt_template:str, 
-                 strategy_prompt:str, 
+                 strategy:str, 
                  model:str, 
                  cache_dir:str
                  ): 
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
-        self.strategy=Strategy(prompt_template, strategy_prompt)
+        self.strategy=Strategy(prompt_template, strategy)
 
         backends={
             'langchain':LangChainGenerator,
             'vllm':VLLMGenerator,
-            'huggingface':HuggingFaceGenerator
+            'huggingface':MyHuggingFaceGenerator
             }
         
         _generator=backends.get(config.backend)
@@ -111,48 +114,21 @@ class MyLactChain(nn.Module):
             config.vllmconfig.llm_name=model
             self.generator=_generator(config.backend)(**config.vllmconfig.model_dump())
 
-        if self.generator.tokenizer.pad_token is None: 
-            self.generator.tokenizer.pad_token=self.generator.tokenizer.eos_token
-
         self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
         self.format_instructions = self.pydantic_parser.get_format_instructions()
 
-    def compile_strategy(self, ): 
-        ...
-
-    def propose_strategy(self, strategy_prompt:str) -> str: 
-        
-        ...
-    
-
-    def propose_strategy(self, new_strategy_prompt:Optional[str]=None) -> str:
-        self.strategy.modify_strategy_prompt(new_strategy_prompt) if new_strategy_prompt else None
-        prompt=PromptTemplate(template="{input}", 
-                              input_variables=['input'], 
-                              partial_variables={"format_instructions": self.format_instructions})
-        chain=prompt | self.pipeline_model | self.pydantic_parser
-        output=chain.invoke({'input':self.strategy.strategy_prompt})
-        breakpoint()
-        strategy=self.pydantic_parser.parse(output)
-        return strategy
-    
-    def sample_action(self, state:Dict[str, Any], strategy:str) -> List[str]: 
-        policy=self.strategy.compile_policy_prompt(state)
-        input_ids, _attention_mask=self.tokenizer(policy, **self.tokenizer_configs)
-        policy_tokens=self.model.generate(input_ids)
-        action=self.tokenizer.decode(policy_tokens.squeeze(), skip_special_tokens=True)
-        return ...
-
-
+    def sample_actions(self, states:str | list[str]) -> list[str]: 
+        strategies=[self.strategy(state) for state in states] if isinstance(states, list)\
+                                                            else self.strategy(states)
+        outputs=self.generator.generate(strategies)
+        return outputs
 
 if __name__=="__main__": 
 
-    ####### Automodel test #######
     policy_config=PolicyConfig()
     lactchain=MyLactChain(policy_config, PROMPT_TEMPLATE, STRATEGY_PROMPT, 
-                          'microsoft/Phi-3-mini-4k-instruct', './')
-    
-    prompts=['Hello how are you doing?', 'Can you write a poem for me?']
-    # breakpoint()
-    output=lactchain.generator.generate(prompts)
+                          "mistralai/Mistral-7B-Instruct-v0.3", './')
+    states=["x=10, y=5, orientation=right", 'x = 20, y=0, orientation=left']
+    outputs=lactchain.sample_actions(states)
+
     breakpoint()

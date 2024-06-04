@@ -1,7 +1,7 @@
 from torch.utils.data import Dataset, DataLoader
 import torch
 from collections import deque, namedtuple
-from typing import Tuple, List, Any, Dict, Union
+from typing import Tuple, List, Any, Dict, Union, Callable, Optional
 from dataclasses import dataclass
 from torch.utils.data import DataLoader, Dataset
 
@@ -48,7 +48,7 @@ class DPODataset(Dataset):
     def __getitem__(self, idx:int): 
         return self.dataset[idx]
     
-    def extend(self, 
+    def add_transition(self, 
                 state:Dict[str, Any], 
                 action:List[str], 
                 reward:int,
@@ -57,8 +57,24 @@ class DPODataset(Dataset):
         transition=self.Transition(state, action, reward, next_state)
         self.dataset.append(transition)
 
-    def clear(self): 
-        self.
+
+class DPOCollator(object): 
+    def __init__(self, tokenizer:Callable, call_kwargs:Optional[Dict[str, Any]]=None): 
+        from transformers import AutoTokenizer
+        self.tokenizer=tokenizer
+        if tokenizer.pad_token is None: 
+            self.tokenizer.pad_token=self.tokenizer.eos_token
+        self.call_kwargs=call_kwargs if call_kwargs is not None else \
+            {'padding':'longest', 
+             'return_tensors':'pt'}
+
+    def __call__(self, batch:list[str]) -> list[str]:
+
+        batch = [self.tokenizer(prompt, **self.call_kwargs) 
+                 for prompt in batch]
+        breakpoint()
+        return {}
+
     
 if __name__=="__main__": 
 

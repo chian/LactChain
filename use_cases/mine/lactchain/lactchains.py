@@ -6,12 +6,12 @@ from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 from langchain.schema import OutputParserException
 from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline, GPT2LMHeadModel, AutoModelForCausalLM
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 import torch, torch.nn as nn, torch.nn.functional as F
 import pprint as pp
-sys.path.append('/lus/eagle/projects/FoundEpidem/bhsu/2024_research/LactChain')
+sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 from classes.lactchain import LactChain, Context, Component
 from langchain_core.prompts import PromptTemplate
 from use_cases.mine.lactchain.config import BaseConfig
@@ -98,36 +98,30 @@ class MyLactChain(nn.Module):
             'vllm':VLLMGenerator,
             'huggingface':HuggingFaceGenerator
             }
-
-        configs={
-            'langchain':GeneratorConfig, 
-            'vllm':VLLMGeneratorConfig, 
-            'huggingface':HuggingFaceGeneratorConfig
-            }
         
-        _generator, _config=backends.get(config.backend), configs.get(config.backend)
-        _config.model_name_or_path=config.
+        _generator=backends.get(config.backend)
+
         if config.backend=='langchain': 
-            self.generator=_generator(**config.langchainconfig)
+            config.langchainconfig.model=model
+            self.generator=_generator(**config.langchainconfig.model_dump())
         elif config.backend=='huggingface': 
             config.huggingfaceconfig.pretrained_model_name_or_path=model
-            self.generator(**config.huggingfaceconfig)
+            self.generator=_generator(config.huggingfaceconfig)
         elif config.backend=='vllm': 
-            self.generator=backends.get(config.backend)(**config.vllmconfig)
+            config.vllmconfig.llm_name=model
+            self.generator=_generator(config.backend)(**config.vllmconfig.model_dump())
 
-        breakpoint()
-        # self.tokenizer_configs={
-        #     'padding':True,
-        #     'return_tensors':'pt',
-        #     'return_attention_mask':True 
-        #     }
+        if self.generator.tokenizer.pad_token is None: 
+            self.generator.tokenizer.pad_token=self.generator.tokenizer.eos_token
 
         self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
         self.format_instructions = self.pydantic_parser.get_format_instructions()
 
+    def compile_strategy(self, ): 
+        ...
 
     def propose_strategy(self, strategy_prompt:str) -> str: 
-
+        
         ...
     
 
@@ -156,9 +150,9 @@ if __name__=="__main__":
     ####### Automodel test #######
     policy_config=PolicyConfig()
     lactchain=MyLactChain(policy_config, PROMPT_TEMPLATE, STRATEGY_PROMPT, 
-                          'mistralai/Mixtral-8x7B-Instruct-v0.1', './')
+                          'microsoft/Phi-3-mini-4k-instruct', './')
     
-    prompt='Hello how are you doing?'
-
-    output=lactchain.generator.generate(prompt)
+    prompts=['Hello how are you doing?', 'Can you write a poem for me?']
+    # breakpoint()
+    output=lactchain.generator.generate(prompts)
     breakpoint()

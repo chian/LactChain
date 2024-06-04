@@ -3,13 +3,13 @@ import torch
 from collections import deque, namedtuple
 from typing import Tuple, List, Any, Dict, Union
 from dataclasses import dataclass
-from datasets import 
+from torch.utils.data import DataLoader, Dataset
 
 import sys, os
 sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 
 
-class Memory(object): 
+class Memory(Dataset): 
     def __init__(self, max_len:int): 
         self.storage=deque(maxlen=max_len)
         self.Transition=namedtuple('Transition', 
@@ -30,12 +30,35 @@ class Memory(object):
     
     def __getitem__(self, idx:int) -> Any:
         return self.storage[idx]
-    
-class Dataset(): 
+
+class DPODataset(Dataset): 
     '''This should be a dataset that stores the transition + the advantage that you calculate at the 
     End of the episode
     '''
-    ...
+    def __init__(self):
+        super().__init__() 
+        self.dataset=[]
+        self.Transition=namedtuple('Transition', 
+                            ['state', 'action', 'reward', 'next_state']
+                            )
+
+    def __len__(self): 
+        return len(self.dataset)
+    
+    def __getitem__(self, idx:int): 
+        return self.dataset[idx]
+    
+    def extend(self, 
+                state:Dict[str, Any], 
+                action:List[str], 
+                reward:int,
+                next_state:Dict[str, Any], 
+               ): 
+        transition=self.Transition(state, action, reward, next_state)
+        self.dataset.append(transition)
+
+    def clear(self): 
+        self.
     
 if __name__=="__main__": 
 

@@ -101,15 +101,15 @@ class ValueFunctionConfig(BaseConfig):
     torch_dtype:str=Field('torch.float32')
 
 
-class HuggingfaceConfig(BaseConfig): 
-    modelname:str=Field("meta-llama/Meta-Llama-3-70B")
-    tokenizer_args:Dict=Field(
-            {
-            'padding':True,
-            'return_tensors':'pt',
-            'return_attention_mask':True 
-            }
-    )
+# class HuggingfaceConfig(BaseConfig): 
+#     modelname:str=Field("meta-llama/Meta-Llama-3-70B")
+#     tokenizer_args:Dict=Field(
+#             {
+#             'padding':True,
+#             'return_tensors':'pt',
+#             'return_attention_mask':True 
+#             }
+#     )
 
 if __name__=="__main__": 
 

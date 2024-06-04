@@ -5,13 +5,31 @@ import sys, os
 import numpy as np
 from textwrap import dedent
 from pydantic import BaseModel, Field
-from typing import Any, Union, Dict, Tuple, List, Optional
+from typing import Any, Union, Dict, Tuple, List, Optional, Literal
 from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
 from transformers import BitsAndBytesConfig
 from torch import Tensor
 sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 from classes.learning import LearningScheme
-from use_cases.mine.lactchain.config import ValueFunctionConfig
+from use_cases.mine.lactchain.config import BaseConfig
+
+class LoraConfigSettings(BaseConfig): 
+    r:int=Field(8)
+    lora_alpha:int=Field(32)
+    target_modules:List[str]=Field(["q_proj", "v_proj", "k_proj", "o_proj"])
+    lora_dropout:float=Field(0.05)
+    bias:str=Field('all')
+    task_type:str=Field("SEQ_CLS")
+
+class ValueFunctionConfig(BaseConfig): 
+    bb_config:Any=Field(None)
+    peft_type:Literal['lora', 'qlora']=Field('lora')
+    lora_config_settings:LoraConfigSettings=Field(default_factory=LoraConfigSettings)
+    printer:bool=Field(True)
+    max_seq_length:int=Field(128)
+    model_name:str=Field('meta-llama/Meta-Llama-3-8B')
+    tokenizer_name:str=Field('meta-llama/Meta-Llama-3-8B')
+    torch_dtype:str=Field('torch.float32')
 
 class ValueFunction(nn.Module): 
     '''Config is type ValueFunctionConfig class and will dump sub-configs or attr into the model'''
@@ -26,12 +44,10 @@ class ValueFunction(nn.Module):
             'padding':'longest'
         }
         # model setup 
-        self.lora_config=LoraConfig(**config.lora_config.model_dump())
-        self.trunk_model=AutoModel.from_pretrained(config.model_name, torch_dtype=torch.float32)
-        
+        self.lora_config=LoraConfig(**config.lora_config_settings.model_dump())
         if config.peft_type=='lora': 
             _trunk_model=AutoModel.from_pretrained(config.model_name, torch_dtype=torch.float32)
-            self.model=LoraModel(_trunk_model, self.lora_config, 'lora_adapter')
+            self.model=LoraModel(_trunk_model, self.lora_config, "default")
         elif config.peft_type=='qlora':
             _quant_config=BitsAndBytesConfig(load_in_8bit=True)
             _trunk_model=AutoModel.from_pretrained(config.model_name, 
@@ -59,25 +75,20 @@ class ValueFunction(nn.Module):
                       ''')
 
     def forward(self, 
-                states:Dict[str, Any] | str, 
-                info:Optional[str]=None
+                states:Dict[str, Any] | list[Dict[str, Any]], 
+                info:Optional[str | list[str]]=None
                 ) -> Tensor: 
-        states=str(states) if isinstance(states, dict) else states
+        states=[states] if isinstance(states, dict) else states
+        states=[str(state) for state in states]
         if info is not None: 
-            states+='\n'+info
+            info=[info] if isinstance(info, str) else info
+            states=[states+'\n'+info for states, info in zip(states, info)]
         inputs = self.tokenizer(states, **self.tokenizer_call_kwargs)
         outputs = self.model(**inputs)
         last_hidden_states = outputs.last_hidden_state
         q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
-        pred_q_value = q_values.mean()  # Take the mean of the first logit
-        return pred_q_value # shape B x 1
-
-
-class ValueFunctionLearningScheme(LearningScheme): 
-    def __init__(self, model:AutoModel, config): 
-
-        ...
-
+        pred_q_values = q_values.mean(dim=-1)  # Take the mean of the first logit
+        return pred_q_values # shape B x 1
 
 
 class ValueFunctionLearningScheme(LearningScheme):
@@ -119,7 +130,14 @@ class ValueFunctionLearningScheme(LearningScheme):
 
 if __name__=="__main__": 
 
+
+
     config=ValueFunctionConfig()
     valuefunction=ValueFunction(config)
+
+    states=[{'x':3, 'y':4, 'orientation':'right'}, {'x':4, 'y':5, 'orientation':'left'}]
+    info=['grid world is size 5', 'grid world is size 6']
+
+    values=valuefunction(states, info)
 
     breakpoint()

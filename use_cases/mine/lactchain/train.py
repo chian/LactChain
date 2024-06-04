@@ -1,5 +1,5 @@
 import sys, os
-from typing import List, Callable
+from typing import List, Callable, Dict, Any
 from torch import Tensor
 import torch, torch.nn as nn, torch.nn.functional as F
 import gymnasium as gym
@@ -7,16 +7,50 @@ import gymnasium as gym
 sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 from classes.lactchain import LactChain, Context, Component
 from use_cases.mine.lactchain.environment import GridEnvironment
-from use_cases.mine.lactchain.critic import ValueFunction
-from use_cases.mine.lactchain.lactchains import MyLactChain
+from use_cases.mine.lactchain.critic import ValueFunction, ValueFunctionConfig, LoraConfig
+from use_cases.mine.lactchain.lactchains import MyLactChain, PolicyConfig
 from use_cases.mine.lactchain.dataset import DPODataset
 
-def calc_returns(rewards:List[int], cum_rewards:List[int], gamma:float) -> List[Tensor]:
+
+def calc_returns(rewards:List[int], gamma:float) -> List[Tensor]:
+    '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
+    Input: Sequence[int] -> Output: Sequence[torch(int)]
+    '''
+    returns=[]
     R = 0
     for r in rewards[::-1]: 
         R = r + gamma*R
-        cum_rewards.insert(0, torch.tensor(R))
-    return cum_rewards
+        returns.insert(0, torch.tensor(R))
+    return returns
+
+def simple_train(env:gym.Env, num_episodes:int, lactchain:MyLactChain, 
+                 critic:ValueFunction, dataset:DPODataset): 
+    '''Assumes one episode'''
+    states=[]
+    actions=[]
+    next_states=[]
+    rewards=[]
+
+    done=False
+    num_steps=1000
+    steps=0
+    obs, info=env.reset()
+    while not done and steps<=num_steps: 
+
+        action=lactchain.sample_action(obs, info)
+    
+    ...
+
+
+
+def calculate_advantage(states:list[int], actions, rewards, next_states, critic, gamma) -> Dict[str, Any]: 
+    states_tensor=torch.Tensor(states)
+    next_states_tensor=torch.Tensor(next_states)
+    rewards_tensor=torch.Tensor(rewards)
+    values=critic(states)
+    next_values=critic(next_states)
+    advantages=(rewards_tensor + gamma*next_values - values)
+    return ...
 
 def sample_experience(env:gym.Env, num_episodes:int, lactchain:MyLactChain, 
                       critic:ValueFunction, dataset:DPODataset): 
@@ -34,16 +68,17 @@ def sample_experience(env:gym.Env, num_episodes:int, lactchain:MyLactChain,
         while not done and steps<=max_steps:
 
             action=lactchain.sample_actions(obs, info)
+            breakpoint()
             next_obs, reward, done, info  = env.step(action)  # Execute the action
 
-            states.append(obs)
+            states.append(str(obs)) # turn states into string
             actions.append(action)
-            next_states.append(next_obs)
+            next_states.append(str(next_obs)) # turn states into string 
             rewards=rewards.append(reward)
 
             obs=next_obs
             steps += 1
-
+            breakpoint()
         ##### advantage calculation
         states_tensor=torch.Tensor(states)
         next_states_tensor=torch.Tensor(next_states)
@@ -60,33 +95,19 @@ def sample_experience(env:gym.Env, num_episodes:int, lactchain:MyLactChain,
     return dataset
 
 
-def collect_experience(num_episodes:int, 
-                       env:gym.Env, 
-                       lactchain:LactChainA, 
-                       critic:ValueFunction, 
-                       memory:Memory, 
-                       max_steps:int
-                       ): 
-
-    for episode in range(num_episodes): 
-        done=False
-        step=0
-        obs = env.reset()
-
-        while not done and step<=max_steps: 
-
-            action = lactchain.propose_action(obs)
-            next_obs, reward, done = env.step(action)
-            memory.add_transition(obs, action, reward, next_obs)
-
-            obs=next_obs
-            step+=1
-
-
-
 if __name__=="__main__": 
 
+    lactchain_config=PolicyConfig()
+    critic_config=ValueFunctionConfig()
 
+    lactchain=MyLactChain(lactchain_config, "mistralai/Mistral-7B-Instruct-v0.3", './')
+    env=GridEnvironment()
+    critic=ValueFunction(critic_config)
+    dataset=DPODataset()
+    breakpoint()
+
+    dataset=sample_experience(env, 5, lactchain, critic, dataset)
 
     breakpoint()
+
     

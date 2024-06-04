@@ -38,7 +38,7 @@ ORIGINAL_STRATEGY="""\
             You are in gridworld. Make a move to help you reach the goal. 
             Your response must be some kind of move, even if you have to guess. 
             """
-STRATEGY_PROMPT=dedent("""\
+STRATEGY=dedent("""\
             You are an intelligent strategist agent that is in gridworld. 
             Come up with a plausable strategy for how you might want to navigate gridworld and 
             help you reach the goal. Your response must be some kind of move, even if you have to guess. 
@@ -88,14 +88,12 @@ class Strategy(object):
 class MyLactChain(nn.Module): 
     def __init__(self,
                  config:PolicyConfig,
-                 prompt_template:str, 
-                 strategy:str, 
                  model:str, 
                  cache_dir:str
                  ): 
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
-        self.strategy=Strategy(prompt_template, strategy)
+        self.strategy=Strategy(PROMPT_TEMPLATE, STRATEGY)
 
         backends={
             'langchain':LangChainGenerator,
@@ -118,16 +116,15 @@ class MyLactChain(nn.Module):
         self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
         self.format_instructions = self.pydantic_parser.get_format_instructions()
 
-    def sample_actions(self, states:str | list[str], info:str) -> list[str]: 
-        strategies=[self.strategy(state, info) for state in states] if isinstance(states, list)\
-                                                            else self.strategy(states, info)
-        outputs=self.generator.generate(strategies)
+    def sample_actions(self, states:Dict[str, Any], info:str) -> list[str]: 
+        strategy=self.strategy(states, info)
+        outputs=self.generator.generate(strategy)
         return outputs
 
 if __name__=="__main__": 
 
     policy_config=PolicyConfig()
-    lactchain=MyLactChain(policy_config, PROMPT_TEMPLATE, STRATEGY_PROMPT, 
+    lactchain=MyLactChain(policy_config, 
                           "mistralai/Mistral-7B-Instruct-v0.3", './')
     states=["x=10, y=5, orientation=right", 'x = 20, y=0, orientation=left']
     outputs=lactchain.sample_actions(states)

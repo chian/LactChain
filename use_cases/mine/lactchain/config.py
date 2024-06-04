@@ -82,24 +82,6 @@ class BaseConfig(BaseModel):
             raw_data = yaml.safe_load(fp)
         return cls(**raw_data)
 
-class LoraConfig(BaseConfig): 
-    r:int=Field(8)
-    lora_alpha:int=Field(32)
-    target_modules:List[str]=Field(["q_proj", "v_proj", "k_proj", "o_proj"])
-    lora_dropout:float=Field(0.05)
-    bias:str=Field('all')
-    task_type:str=Field("SEQ_CLS")
-
-class ValueFunctionConfig(BaseConfig): 
-    bb_config:Any=Field(None)
-    peft_type:Literal['lora', 'qlora']=Field('qlora')
-    lora_config:LoraConfig=Field(default_factory=LoraConfig)
-    printer:bool=Field(True)
-    max_seq_length:int=Field(128)
-    model_name:str=Field('meta-llama/Meta-Llama-3-8B')
-    tokenizer_name:str=Field('meta-llama/Meta-Llama-3-8B')
-    torch_dtype:str=Field('torch.float32')
-
 
 # class HuggingfaceConfig(BaseConfig): 
 #     modelname:str=Field("meta-llama/Meta-Llama-3-70B")

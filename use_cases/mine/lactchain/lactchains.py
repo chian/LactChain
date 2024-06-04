@@ -58,6 +58,7 @@ PROMPT_TEMPLATE=dedent("""\
             E.g. ['move forward', 'turn left']. 
                                               
             Here is your current position in grid world: {position}
+            Here is some extra information of grid world: {info}
             """)
 
 class Strategy(object): 
@@ -72,9 +73,9 @@ class Strategy(object):
     def show_state(state:Dict[str, Any]): 
         pp.print(state)
 
-    def __call__(self, state:Dict[str, Any]) -> str:
+    def __call__(self, state:Dict[str, Any], info:str) -> str:
         '''formats final prompt from state input from env and strategy declaration'''
-        final_prompt=self.prompt_template.format(strategy=self.strategy, position=state)
+        final_prompt=self.prompt_template.format(strategy=self.strategy, position=state, info=info)
         return final_prompt
     
     def modify_strategy_prompt(self, new_strategy:str) -> str:
@@ -117,9 +118,9 @@ class MyLactChain(nn.Module):
         self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
         self.format_instructions = self.pydantic_parser.get_format_instructions()
 
-    def sample_actions(self, states:str | list[str]) -> list[str]: 
-        strategies=[self.strategy(state) for state in states] if isinstance(states, list)\
-                                                            else self.strategy(states)
+    def sample_actions(self, states:str | list[str], info:str) -> list[str]: 
+        strategies=[self.strategy(state, info) for state in states] if isinstance(states, list)\
+                                                            else self.strategy(states, info)
         outputs=self.generator.generate(strategies)
         return outputs
 

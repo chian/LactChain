@@ -8,8 +8,8 @@ sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 from classes.lactchain import LactChain, Context, Component
 from use_cases.mine.lactchain.environment import GridEnvironment
 from use_cases.mine.lactchain.critic import ValueFunction
-from use_cases.mine.lactchain.lactchains import LactChainA
-from use_cases.mine.lactchain.dataset import Memory
+from use_cases.mine.lactchain.lactchains import MyLactChain
+from use_cases.mine.lactchain.dataset import DPODataset
 
 def calc_returns(rewards:List[int], cum_rewards:List[int], gamma:float) -> List[Tensor]:
     R = 0
@@ -18,40 +18,46 @@ def calc_returns(rewards:List[int], cum_rewards:List[int], gamma:float) -> List[
         cum_rewards.insert(0, torch.tensor(R))
     return cum_rewards
 
-def sample_experience(env:gym.Env, num_episodes:int, lactchains:List[Callable]): 
+def sample_experience(env:gym.Env, num_episodes:int, lactchain:MyLactChain, 
+                      critic:ValueFunction, dataset:DPODataset): 
     states=[]
     actions=[]
     next_states=[]
-    dones=[]
-    target_q_values=[]
+    rewards=[]
     max_steps=100
+    gamma=torch.Tensor(0.99,)
 
     for episode in range(num_episodes): 
-        obs = env.reset()
+        obs, info = env.reset()
         done = False
         steps = 0
         while not done and steps<=max_steps:
-            action = env.lact_chains[0].propose_action() 
-            next_obs, tot_reward, rewards, done  = env.step(action)  # Execute the action
-            target_q_value = compute_target_q_value(next_obs, rewards, done)
+
+            action=lactchain.sample_actions(obs, info)
+            next_obs, reward, done, info  = env.step(action)  # Execute the action
 
             states.append(obs)
             actions.append(action)
             next_states.append(next_obs)
-            dones.append(done)
-            target_q_values.append(target_q_value)
+            rewards=rewards.append(reward)
 
             obs=next_obs
             steps += 1
 
-    return states, actions, next_states, dones, 
-    ...
+        ##### advantage calculation
+        states_tensor=torch.Tensor(states)
+        next_states_tensor=torch.Tensor(next_states)
+        rewards_tensor=torch.Tensor(rewards)
 
-def compute_advantage(): 
-    ...
+        values=critic(states)
+        next_values=critic(next_states)
+        advantages=(rewards_tensor + gamma*next_values - values)
+        
+    dataset.add_batch_transitions(states_tensor, actions, rewards_tensor, next_states_tensor, advantages)
 
-def compute_target_q_value(): 
-    ...
+    print(f'Episode completed in {steps} interactions')
+    
+    return dataset
 
 
 def collect_experience(num_episodes:int, 
@@ -76,36 +82,11 @@ def collect_experience(num_episodes:int,
             obs=next_obs
             step+=1
 
-        compute_advantage(...)
-    ...
-
-def compute_advantage():
-    ...
 
 
 if __name__=="__main__": 
 
-    env=GridEnvironment()
-    obs=env.reset()
 
-    cum_rewards=[]
-    policy_losses=[]
-    critic_losses=[]
-
-    action_seq=['turn left', 'turn left', 'move forward', 'move forward', 'move forward', 'move forward']
-    obs, tot_reward, rewards, done = env.step(action_seq)
-
-    returns=calc_returns(rewards, cum_rewards, gamma=0.99)
-
-    for (log_prob, value), R in zip(action_values, cum_rewards): 
-        advantage = R - value
-        critic_losses.append(F.smooth_l1_loss(R, value))
-        policy_losses.append((-1)*log_prob*advantage)
-
-        critic_loss=torch.stack(critic_losses).mean()
-        policy_loss=torch.stack(policy_losses).mean()
-
-        
 
     breakpoint()
     

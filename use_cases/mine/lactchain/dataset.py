@@ -4,42 +4,26 @@ from collections import deque, namedtuple
 from typing import Tuple, List, Any, Dict, Union, Callable, Optional
 from dataclasses import dataclass
 from torch.utils.data import DataLoader, Dataset
-
+from datasets import Dataset as HFDataset, concatenate_datasets
+from torch import Tensor
 import sys, os
 sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 
 
-class Memory(Dataset): 
-    def __init__(self, max_len:int): 
-        self.storage=deque(maxlen=max_len)
-        self.Transition=namedtuple('Transition', 
-                                   ['state', 'action', 'reward', 'next_state']
-                                   )
-
-    def add_transition(self, 
-                       state:Dict[str, Any], 
-                       action:List[str], 
-                       reward:int,
-                       next_state:Dict[str, Any], 
-                       ):
-        transition=self.Transition(state, action, reward, next_state)
-        self.storage.append(transition)
-    
-    def __len__(self): 
-        return len(self.storage)
-    
-    def __getitem__(self, idx:int) -> Any:
-        return self.storage[idx]
-
-class DPODataset(Dataset): 
-    '''This should be a dataset that stores the transition + the advantage that you calculate at the 
+class DPODataset(HFDataset): 
+    '''
+    NOTE: THIS SHOULD STORE THE TRANSITIONS, THEN WE MAKE ANOTHER CLASS THAT TURNS THIS INTO A
+    HFDATASET VIA FROM_GENERATOR OR FROM_DICT
+    This should be a dataset that stores the transition + the advantage that you calculate at the 
     End of the episode
     '''
     def __init__(self):
         super().__init__() 
-        self.dataset=[]
-        self.Transition=namedtuple('Transition', 
-                            ['state', 'action', 'reward', 'next_state']
+        self.dataset=HFDataset.from_dict(
+            {'state':[], 'action':[], 'reward':[], 'next_state':[], 'advantage':[]}
+            )
+        self.transition=namedtuple('Transition', 
+                            ['state', 'action', 'reward', 'next_state', 'advantage']
                             )
 
     def __len__(self): 
@@ -47,15 +31,16 @@ class DPODataset(Dataset):
     
     def __getitem__(self, idx:int): 
         return self.dataset[idx]
-    
-    def add_transition(self, 
-                state:Dict[str, Any], 
-                action:List[str], 
-                reward:int,
-                next_state:Dict[str, Any], 
-               ): 
-        transition=self.Transition(state, action, reward, next_state)
-        self.dataset.append(transition)
+
+    def add_batch_transitions(self, states:Tensor, actions:list[int], 
+                              rewards:Tensor, next_states:Tensor, 
+                              advantages:Tensor) -> None:
+        _transition=self.transition(states, actions, rewards, next_states, advantages)
+        _new_dataset=HFDataset.from_dict(_transition._asdict())
+        self.dataset=concatenate_datasets([self.dataset, _new_dataset])
+        
+    def __str__(self): 
+        return f'{self.dataset}'
 
 
 class DPOCollator(object): 
@@ -77,16 +62,23 @@ class DPOCollator(object):
 
     
 if __name__=="__main__": 
+    import torch, torch.nn as nn, torch.nn.functional as F
+    import sys, os
 
-    memory=Memory(100)
+    dataset=DPODataset()
+    r, gamma = 0.1, 0.99
 
-    state={'x':0, 'y':0, 'orientiation':100}
+    V = nn.Linear(1, 1)
+
+    state={'x':3, 'y':0, 'orientiation':100}
     action=['move left', 'move right']
     reward=-6
     next_state={'x':1, 'y':10, 'orientation':200}
     advantage=1000
+    breakpoint()
+    advantage=reward + gamma*V(torch.Tensor(next_state['x'],)) + V(torch.Tensor(state['x'],))
     
-    memory.add_transition(state, action, reward, next_state, advantage)
+    dataset.add_transition(state, action, reward, next_state, advantage)
 
     breakpoint()
 

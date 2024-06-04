@@ -21,6 +21,10 @@ class ValueFunction(nn.Module):
         super().__init__()
 
         self.config=config
+        self.tokenizer_call_kwargs={
+            'return_tensors':'pt',
+            'padding':'longest'
+        }
         # model setup 
         self.lora_config=LoraConfig(**config.lora_config.model_dump())
         self.trunk_model=AutoModel.from_pretrained(config.model_name, torch_dtype=torch.float32)
@@ -42,7 +46,8 @@ class ValueFunction(nn.Module):
         self.tokenizer=AutoTokenizer.from_pretrained(config.tokenizer_name)
         self.tokenizer.model_max_length = min(self.model.config.max_position_embeddings, 
                                               config.max_seq_length)
-        self.tokenizer.pad_token = '[PAD]' if self.tokenizer.pad_token_id is None else None
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def __repr__(self):
         PEFT_CONFIG=self.config.lora_config if self.config.lora_config is not None else "None"
@@ -54,14 +59,18 @@ class ValueFunction(nn.Module):
                       ''')
 
     def forward(self, 
-                input_ids:Tensor, 
-                attention_mask:Optional[Tensor]=None
+                states:Dict[str, Any] | str, 
+                info:Optional[str]=None
                 ) -> Tensor: 
-        outputs = self.model(input_ids, attention_mask=attention_mask)
+        states=str(states) if isinstance(states, dict) else states
+        if info is not None: 
+            states+='\n'+info
+        inputs = self.tokenizer(states, **self.tokenizer_call_kwargs)
+        outputs = self.model(**inputs)
         last_hidden_states = outputs.last_hidden_state
         q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
         pred_q_value = q_values.mean()  # Take the mean of the first logit
-        return pred_q_value
+        return pred_q_value # shape B x 1
 
 
 class ValueFunctionLearningScheme(LearningScheme): 

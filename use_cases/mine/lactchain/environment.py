@@ -28,16 +28,20 @@ class GridEnvironment(gym.Env):
         self.state=None
         self.reset()
 
-    def reset(self) -> Tuple[int]: 
+    def reset(self) -> Tuple[Dict[str, Any], str]: 
         self.state={'x':0, 'y':0, 'orientation':0} # ressetting state
-        return self._get_obs()
+        return self._get_obs(), f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'
 
-    def _get_obs(self) -> Tuple[Dict[str, int], Dict[str, Any]]: 
+    def _get_obs(self) -> Dict[str, Any]: 
         return {'x':self.state['x'], 
                 'y':self.state['y'], 
                 'orientation':self.state['orientation']}
     
-    def step(self, action_sequence:List[str]) -> Tuple[Dict[str, int], int, List[int], bool]:
+    def step(self, action_sequence:List[str]) -> Tuple[Dict[str, int], 
+                                                       int, 
+                                                       List[int], 
+                                                       bool, 
+                                                       str]:
         total_reward = 0
         done = False
 
@@ -47,7 +51,7 @@ class GridEnvironment(gym.Env):
             self.state, reward, done = self._process_action(action)
             total_reward += reward
 
-        return self._get_obs(), total_reward, done
+        return self._get_obs(), total_reward, done, f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'
     
     def _process_action(self, action_command:str) -> Tuple[Tuple[int], int, bool]:
         assert action_command in ['move forward', 'turn left'], \

@@ -28,6 +28,7 @@ class ActorModelForCausalLM(AutoModelForCausalLM):
     def forward(self, input_ids, attention_mask, **kwargs): 
         ...
 
+
 if __name__=="__main__": 
 
     MODEL="mistralai/Mistral-7B-Instruct-v0.3"

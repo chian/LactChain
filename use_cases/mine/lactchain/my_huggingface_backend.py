@@ -154,6 +154,7 @@ class MyHuggingFaceGenerator:
         '''generates batch outputs and then filters out attached input prompt via string slicing'''
         input_lengths=[len(prompt) for prompt in prompts]
         raw_outputs = self.chain.batch(prompts)
+        breakpoint()
         outputs=[raw_output[input_length:] for raw_output, input_length in zip(raw_outputs, input_lengths)]
         return outputs
 

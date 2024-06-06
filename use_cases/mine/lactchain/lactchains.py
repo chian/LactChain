@@ -116,17 +116,28 @@ class MyLactChain(nn.Module):
         self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
         self.format_instructions = self.pydantic_parser.get_format_instructions()
 
-    def sample_actions(self, states:Dict[str, Any], info:str) -> list[str]: 
-        strategy=self.strategy(states, info)
-        outputs=self.generator.generate(strategy)
+    def sample_actions(self, 
+                       states:Dict[str, Any] | list[Dict[str, Any]], 
+                       infos:str | list[str]
+                       ) -> list[str]: 
+        strategies=[]
+        states=[states] if isinstance(states, dict) else states
+        infos=[infos] if isinstance(infos, str) else infos
+        for (state, info) in zip(states, infos): 
+            strategy=self.strategy(state, info)
+            strategies.append(strategy)
+        outputs=self.generator.generate(strategies)
         return outputs
+
 
 if __name__=="__main__": 
 
     policy_config=PolicyConfig()
     lactchain=MyLactChain(policy_config, 
-                          "mistralai/Mistral-7B-Instruct-v0.3", './')
-    states=["x=10, y=5, orientation=right", 'x = 20, y=0, orientation=left']
-    outputs=lactchain.sample_actions(states)
+                          "meta-llama/Meta-Llama-3-70B-Instruct", './')
+    states=["x=10, y=5, orientation=right", "x = 20, y=0, orientation=left"]
+    states=[{'x':10, 'y':5, 'orientation':'right'}, {'x':3, 'y':5, 'orientation':'left'}]
+    info=['grid world is size 15, 15', 'grid world is size 40x10']
+    outputs=lactchain.sample_actions(states, info)
 
     breakpoint()

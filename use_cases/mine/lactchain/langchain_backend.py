@@ -154,4 +154,6 @@ class LangChainGenerator:
         # Extract the text from the outputs
         outputs = [output['text'] for output in raw_outputs]
         return outputs
+
+
         

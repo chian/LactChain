@@ -1,7 +1,7 @@
 """Module for the hugging face generator backend."""
 
 from __future__ import annotations
-
+import torch
 from typing import Literal, Union, TypeVar, Optional, Dict, Any
 from pathlib import Path
 from pydantic import Field
@@ -97,7 +97,8 @@ class MyHuggingFaceGenerator:
 
         model_kwargs={'device_map':'auto'}
 
-        pipeline_kwargs={'device_map':'auto', 'max_new_tokens':1000}
+        self.tokenizer_call_kwargs={'return_tensors':'pt', 
+                                    'padding':'longest'}
 
         if config.quantization:
             from transformers import BitsAndBytesConfig
@@ -123,6 +124,7 @@ class MyHuggingFaceGenerator:
 
         # Set the model max length for proper truncation
         tokenizer.model_max_length = model.config.max_position_embeddings
+        tokenizer.pad_token=tokenizer.eos_token
         # Convert the model to half precision
         if config.half_precision:
             model.half()
@@ -139,24 +141,29 @@ class MyHuggingFaceGenerator:
         if config.compile_model:
             model = torch.compile(model, fullgraph=True)
 
-        chat_pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer, **pipeline_kwargs)
-        hf_pipeline = HuggingFacePipeline(pipeline=chat_pipeline)
-        prompt = PromptTemplate.from_template('{input}')
-        chain = prompt | hf_pipeline
-
         # Set persistent attributes
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
-        self.chain = chain
 
-    def _generate_batch(self, prompts:list[str]) -> list[str]: 
-        '''generates batch outputs and then filters out attached input prompt via string slicing'''
-        input_lengths=[len(prompt) for prompt in prompts]
-        raw_outputs = self.chain.batch(prompts)
-        breakpoint()
-        outputs=[raw_output[input_length:] for raw_output, input_length in zip(raw_outputs, input_lengths)]
-        return outputs
+    def _generate_batch(self, prompts:list[str], **kwargs:Optional[Dict[str, Any]]) -> list[str]: 
+        '''generates batch outputs and then filters out attached input prompt via token slicing'''
+
+        _tokenizer_call_kwargs={'return_tensors':'pt', 'padding':'longest'}
+        _model_call_kwargs={'num_return_sequences':1, 'max_new_tokens':500}
+
+        batch_encoding=self.tokenizer(prompts, **_tokenizer_call_kwargs)
+        batch_encoding = batch_encoding.to(self.model.device) # returns 
+        input_tokens_len=batch_encoding['input_ids'].shape[-1]
+        with torch.no_grad(): 
+            generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
+        
+        filtered_tokens=[row[input_tokens_len:] for row in generated_tokens]
+
+        decoded_outputs=self.tokenizer.batch_decode(filtered_tokens, 
+                                                    skip_special_tokens=True
+                                                    )
+        return decoded_outputs
 
     def generate(self, prompts:str | list[str]) -> list[str]: 
         """Generate response text from prompts.
@@ -184,6 +191,28 @@ if __name__=="__main__":
     config.pretrained_model_name_or_path="mistralai/Mistral-7B-Instruct-v0.3"
     generator=MyHuggingFaceGenerator(config)
     inputs=['can you give me a sci-fi story?', 
-            'What is the difference between the stack and the heap in coding?']
+            'What is the difference between the stack and the heap in coding?',
+            '''<s>[INST] You are an intelligent agi in grid-world that is of size 5x5. 
+            You may only make one of the following moves to navigate: [move_forward, move_left]
+            Propose a sequence of moves that will allow you to explore or get you to the goal. 
+            All of your output must be stored in a json in the following format, and nothing else: 
+            {{
+            'explain': //Your explanation and logic goes here//
+            'moves': // Your sequence of moves goes here// 
+            }} 
+            YOU ARE NOT ALLOWED TO OUTPUT ANYTHING ELSE THAT DOES NOT STRICTLY ADHERE TO THE JSON FORMAT ABOVE.
+            [/INST]''', 
+            '''
+            You are an intelligent agi in grid-world that is of size 5x5. 
+            You may only make one of the following moves to navigate: [move_forward, move_left]
+            Propose a sequence of moves that will allow you to explore or get you to the goal. 
+            All of your output must be stored in a json in the following format, and nothing else: 
+            {{
+            'explain': //Your explanation and logic goes here//
+            'moves': // Your sequence of moves goes here// 
+            }} 
+            YOU ARE NOT ALLOWED TO OUTPUT ANYTHING ELSE THAT DOES NOT STRICTLY ADHERE TO THE JSON FORMAT ABOVE.
+            '''
+            ]
     outputs=generator.generate(inputs)
     breakpoint()

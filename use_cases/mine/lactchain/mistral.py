@@ -12,38 +12,47 @@ def generate(MODEL:str, prompts:list[str]) -> Tuple[list[str], list[str]]:
 
     tokenizer.pad_token=tokenizer.eos_token
     batch_encoding = tokenizer(prompts, return_tensors="pt", padding='longest')
-    batch_encoding = batch_encoding.to(model.device)
+    '''BatchEncoding: 
+    Dict{
+        input_ids:Tensor B x Seq_len
+        attention_mask:Tensor B x Seq_len
+        }
+    '''
+    batch_encoding = batch_encoding.to(model.device) # returns 
     model.eval()
     with torch.no_grad():
-        generated_text=model.generate(**batch_encoding, 
-                                    num_return_sequences=1, 
-                                    max_new_tokens=500)
+        '''Tensor of shape B, len(max_new_tokens + input_tokens)'''
+        generated_tokens=model.generate(**batch_encoding, 
+                                        num_return_sequences=1, 
+                                        max_new_tokens=500)
+    input_token_length = batch_encoding['input_ids'].shape[-1]
+    processed_tokens=[output[input_token_length:] for output in generated_tokens] # output = row in tensor
 
     decoded_outputs = tokenizer.batch_decode(
-            generated_text,
+            processed_tokens,
             skip_special_tokens=True,
         )
     
-    input_strings=[len(prompt) for prompt in prompts]
-    processed_outputs=[decoded_output[input_string:] 
-                       for decoded_output, input_string in zip(decoded_outputs, input_strings)]
-    
-    return decoded_outputs, processed_outputs
-
-
+    return decoded_outputs
 
 if __name__=="__main__": 
     import sys, os
     from transformers import AutoModelForCausalLM, AutoTokenizer
     import torch
 
-    MODEL='mistralai/Mixtral-8x7B-Instruct-v0.1'
+    MODEL='mistralai/Mistral-7B-Instruct-v0.3'
 
     test_messages=[
         '''<s>[INST] You are an intelligent agi in grid-world that is of size 5x5. 
         You may only make one of the following moves to navigate: [move_forward, move_left]
-        Propose a sequence of moves that will allow you to explore or get you to the goal. Your output must be in the format: 
-        {{'moves': // Your sequence of moves goes here// }} [/INST]''', 
+        Propose a sequence of moves that will allow you to explore or get you to the goal. 
+        All of your output must be stored in a json in the following format, and nothing else: 
+        {{
+        'explain': //Your explanation and logic goes here//
+        'moves': // Your sequence of moves goes here// 
+        }} 
+        YOU ARE NOT ALLOWED TO OUTPUT ANYTHING ELSE THAT DOES NOT STRICTLY ADHERE TO THE JSON FORMAT ABOVE.
+        [/INST]''', 
 
         '''<s>[INST] You are an intelligent agi in grid-world that is of size 4x4. 
         You may only make one of the following moves to navigate: [move_forward, move_left]
@@ -55,7 +64,7 @@ if __name__=="__main__":
         Propose a sequence of moves that will allow you to explore or get you to the goal. Your output must be in the format: 
         {{'moves': // Your sequence of moves goes here// }} [/INST]'''
     ]
-    decoded_outputs, processed_outputs=generate()
+    decoded_outputs, processed_outputs=generate(MODEL, test_messages)
 
     breakpoint()
 

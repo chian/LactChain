@@ -29,8 +29,7 @@ from langchain.output_parsers import PydanticOutputParser
 from langchain.schema import OutputParserException
 
 from peft import get_peft_model, LoraConfig, get_peft_config
-from transformers import TrainingArguments, Trainer, AutoModelForCausalLM, AutoTokenizer
-from datasets import Dataset
+from transformers import TrainingArguments, Trainer, AutoModelForSequenceClassification, AutoTokenizer
 
 class LlamaClientWrapper:
     def __init__(self):
@@ -40,43 +39,87 @@ class LlamaClientWrapper:
         response = self.client.chat(model='llama3', messages=[{'role': 'user', 'content': prompt}])
         return response['message']['content']
 
-class FoundationModel(nn.Module):
+class ValueFunction(nn.Module):
     def __init__(self, model_name="meta-llama/Llama-2-7b-chat-hf"):
-        super(FoundationModel, self).__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(model_name,output_hidden_states=True)
-        self.config = self.model.config
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        super(ValueFunction, self).__init__()
+        #ADD LORA CONFIG HERE
+        self.bb_config = None
+        self.use_qlora = False
+        self.lora_config = LoraConfig(
+            r=8,
+            lora_alpha=32,
+            # target modules varies from model to model
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="SEQ_CLS"
+        )
+        self.printer = True
+        self.max_seq_length = 64
+        self.model_name = model_name
+        self.tokenizer_name = "LlamaTokenizer"
+        
+        # Load the model        
+        if self.use_qlora:
+            from peft import prepare_model_for_kbit_training
+            from transformers import BitsAndBytesConfig
+            bb_config = BitsAndBytesConfig(
+                load_in_8_bit=True,
+            )
+        if self.printer:
+            print('Loading model:', self.model_name)
+        self.base_model = AutoModelForSequenceClassification.from_pretrained(
+            self.model_name,
+            torch_dtype=torch.float32,
+            #attn_implementation="flash_attention_2",
+            #quantization_config=bb_config
+        )
+        if self.use_qlora:
+            if self.printer:
+                print('Preparing model for PEFT training')
+            self.model = prepare_model_for_kbit_training(self.base_model, self.lora_config)
+            if self.printer:
+                print('Model prepared for PEFT training')
+        # Use PEFT, if requested
+        if self.lora_config is not None:
+            if self.printer:
+                print('setting up peft!')
+            #peft_config = get_peft_config(self.peft_config)
+            self.model = get_peft_model(self.base_model, self.lora_config)
+            if self.printer:
+                self.model.print_trainable_parameters()
+        if self.printer:
+            print('Model:', self.model)
+            print('dtype:', self.model.dtype)
+        self.q_value_head = nn.Linear(self.model.config.hidden_size, 1)
+        
+        # Load the tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        #tokenizer = transformers.PreTrainedTokenizerFast.from_pretrained(self.tokenizer_name,)
+        # Set the model max length for proper truncation;
+        # for mistral, 32k is too long and causes OOM failures
+        self.tokenizer.model_max_length = min(self.model.config.max_position_embeddings,
+                                        self.max_seq_length)
+        # Set the pad token if it is not set
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = '[PAD]'
+
     def forward(self, input_ids, attention_mask=None):
         outputs = self.model(input_ids, attention_mask=attention_mask)
-        last_hidden_states = outputs.hidden_states[-1]
-        return last_hidden_states
-
-class ValueFunctionHead(nn.Module):
-    def __init__(self, foundation_model, num_layers=1):
-        super(ValueFunctionHead, self).__init__()
-        self.base_model = foundation_model
-        self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=foundation_model.config.hidden_size, nhead=8), num_layers=num_layers)
-        self.q_value_head = nn.Linear(foundation_model.config.hidden_size, 1)
-
-    def forward(self, inputs, attention_mask=None):
-        # Pass the embedded state vector through the transformer encoder
-        transformer_output = self.transformer(inputs)
-        # Compute the Q-values using the linear head
-        q_values = self.q_value_head(transformer_output)
-        # Take the mean of the Q-values to get a single predicted Q-value
-        predicted_q_value = q_values.mean()
+        last_hidden_states = outputs.last_hidden_state
+        q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
+        predicted_q_value = q_values.mean()  # Take the mean of the first logit
         return predicted_q_value
 
 class ValueFunctionLearningScheme(LearningScheme):
-    def __init__(self, value_function_head):
-        self.model = value_function_head
+    def __init__(self, model):
+        self.model = model
         self.trainer = None
         self.training_args = TrainingArguments(
             output_dir="./model_output",
             num_train_epochs=1,  # Set to 1 for episodic training
             per_device_train_batch_size=16,
-            learning_rate=1e-4,  
+            learning_rate=1e-5,  # Adjusted for PEFT
             logging_dir='./logs',
             logging_steps=10,
         ) 
@@ -84,16 +127,16 @@ class ValueFunctionLearningScheme(LearningScheme):
         def __init__(self, model, args, train_dataset, dtype=None):
             super().__init__(model, args, train_dataset)
             self.dtype = dtype
-        def compute_loss(self,model, inputs, return_outputs=False):
-            # Assuming inputs contain 'input_ids' and 'target_q_value'
-            target_q_values = inputs.get("target_q_value").unsqueeze(-1)  # Ensure target_q_values are correctly shaped
-            outputs = model(input_ids=inputs['input_ids'])  # Call model without attention_mask
-            loss = torch.nn.functional.mse_loss(outputs, target_q_values)
 
-            if return_outputs:
-                return (loss, outputs)
-            else:
-                return loss
+        def compute_loss(self,model, inputs, return_outputs=False):
+            # Custom loss computation
+            target_q_values = inputs.get("target_q_value")
+            # Use the precomputed predicted Q-values from the dataset
+            predicted_q_values = inputs.get('predicted_q_value')
+
+            # Compute the mean squared error loss
+            loss = torch.nn.functional.mse_loss(predicted_q_values, target_q_values)
+            return (loss, outputs) if return_outputs else loss
         
     def update_model(self, train_dataset):
         self.trainer = self.CustomTrainer(
@@ -111,9 +154,8 @@ class ValueFunctionLearningScheme(LearningScheme):
         self.model.load_state_dict(torch.load(filepath))
 
 class QLearningDataset(torch.utils.data.Dataset):
-    def __init__(self, foundation_model, val_func, tokenizer, env, num_samples, gamma=0.99):
-        self.base_model = foundation_model
-        self.val_func = val_func
+    def __init__(self, model, tokenizer, env, num_samples, gamma=0.99):
+        self.model = model
         self.tokenizer = tokenizer
         self.env = env
         self.gamma = gamma
@@ -166,32 +208,31 @@ class QLearningDataset(torch.utils.data.Dataset):
                 steps += 1
                 if steps > self.max_steps:
                     done = True
-        self.inputs = self.get_inputs()
 
     def compute_target_q_value(self):
-        target_q_values = []
         for next_state, reward, done in zip(self.next_states, self.rewards, self.dones):
+            target_q_values = []
             if done:
                 target_q_values.append(reward)
             else:
-                self.base_model.eval()
+                self.model.eval()
                 with torch.no_grad():
                     # Predict Q-values for the next state
                     next_state_prompt = self.prompt_template.format(x=next_state.attributes['x'], 
                                                                     y=next_state.attributes['y'], 
                                                                     orientation=next_state.attributes['orientation'])
                     next_state_inputs = self.tokenizer(next_state_prompt, return_tensors="pt")
-                    valfunc_inputs = self.base_model(**next_state_inputs)
-                    next_state_q_value = self.val_func(valfunc_inputs)
+                    next_state_valuefunc_output = self.model(**next_state_inputs)
+                    next_state_q_value = next_state_valuefunc_output[0][0][0]
                     print("Next state q value:", next_state_q_value, len(self.states))
                     target_q_value = reward + self.gamma * next_state_q_value
-                    target_q_values.append(target_q_value.item())
-        self.base_model.train()
-        self.target_q_values.extend(target_q_values)
+                    target_q_values.append(target_q_value)
+        self.model.train()
+        return target_q_values
 
     #Not actually used by trainer directly but part of computing loss
     def get_predicted_q_values(self):
-        self.base_model.eval()
+        self.model.eval()
         with torch.no_grad():
             predicted_q_values = []
             for state in self.states:
@@ -199,10 +240,10 @@ class QLearningDataset(torch.utils.data.Dataset):
                                                            y=state.attributes['y'], 
                                                            orientation=state.attributes['orientation'])
                 state_inputs = self.tokenizer(state_prompt, return_tensors="pt")
-                valfunc_inputs = self.base_model(**state_inputs)
-                predicted_q_value = self.val_func(valfunc_inputs)
+                state_valuefunc_output = self.model(**state_inputs)
+                predicted_q_value = state_valuefunc_output[0][0][0]
                 predicted_q_values.append(predicted_q_value)
-        self.base_model.train()
+        self.model.train()
         return predicted_q_values
     
     def get_inputs(self):
@@ -211,10 +252,8 @@ class QLearningDataset(torch.utils.data.Dataset):
             state_prompt = self.prompt_template.format(x=state.attributes['x'], 
                                                        y=state.attributes['y'], 
                                                        orientation=state.attributes['orientation'])
-            input_ids = self.tokenizer.encode(state_prompt, return_tensors='pt')
-            state_output = self.base_model(input_ids)
-            valfunc_inputs = state_output  # Take the embedding as input
-            inputs.append({'input_ids': valfunc_inputs})
+            state_inputs = self.tokenizer(state_prompt, return_tensors="pt", padding=True, truncation=True)
+            inputs.append(state_inputs)
         return inputs
     
     def __len__(self):
@@ -233,33 +272,31 @@ class QLearningDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         return {
             'input_ids': self.inputs[idx]['input_ids'].squeeze(),
-            'labels': self.target_q_values[idx]
+            'attention_mask': self.inputs[idx]['attention_mask'].squeeze(),
+            'labels': self.labels[idx]
         }
 
 class QLearning:
-    def __init__(self, foundation_model, val_func, tokenizer, env, num_samples):
-        self.model = foundation_model
-        self.val_func = val_func
+    def __init__(self, model, tokenizer, env, num_samples):
+        self.model = model
         self.tokenizer = tokenizer
         self.env = env
         self.learning_scheme = ValueFunctionLearningScheme(self.model)
         self.datasets = []  # List to store multiple datasets
-        self.current_dataset, self.states = self.update_dataset(num_samples)  # Initialize with the first dataset
+        self.update_dataset(num_samples)  # Initialize with the first dataset
         self.rewards = []  # Store rewards for each episode\
 
     def update_dataset(self, num_samples):
         # Create a new dataset with the specified number of samples
-        new_dataset = QLearningDataset(self.model, self.val_func, self.tokenizer, self.env, num_samples)
-        return new_dataset, new_dataset.states
+        new_dataset = QLearningDataset(self.model, self.tokenizer, self.env, num_samples)
+        self.datasets = [new_dataset]
 
     def learn(self):
         # Update the model using the training dataset
-        training_data = self.current_dataset
-        print("Training Data:", training_data)
+        print("Training Data:", self.datasets[-1])
         import pdb
         pdb.set_trace()
-        ds = Dataset.from_list(training_data)
-        self.learning_scheme.update_model(training_data)
+        self.learning_scheme.update_model(self.datasets[-1])
 
     def plot_rewards(self, window_size=50):
         if len(self.rewards) < window_size:
@@ -496,23 +533,11 @@ if __name__ == "__main__":
  """
     #Test of LearningScheme on Gridworld
     llm = Ollama(model="llama3")
+    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
     env = SimpleEnvironment(grid_size=2)
     env.lact_chains = [LactChainA(llm=llm)]
-    foundation_model = FoundationModel(model_name="mistralai/Mistral-7B-Instruct-v0.2")
-    tokenizer = foundation_model.tokenizer
-    tokenizer.pad_token = tokenizer.eos_token
-    val_func = ValueFunctionHead(foundation_model=foundation_model)
-    qlearning = QLearning(foundation_model=foundation_model, val_func=val_func, tokenizer=tokenizer, env=env, num_samples=5)
-    
-    from torch.utils.data import DataLoader
-
-    training_data = qlearning.current_dataset
-    dataloader = DataLoader(training_data, batch_size=1, shuffle=False)
-    print("Length of DataLoader:", len(dataloader))
-    for batch in dataloader:
-        print("Batch:", batch)
-        exit(0)
-
+    val_func = ValueFunction(model_name="mistralai/Mistral-7B-Instruct-v0.2")
+    qlearning = QLearning(model=val_func.model, tokenizer=val_func.tokenizer, env=env, num_samples=2)
     for _ in range(2):
         qlearning.learn()
         exit(0)

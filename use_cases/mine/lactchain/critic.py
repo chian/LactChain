@@ -78,11 +78,13 @@ class ValueFunction(nn.Module):
                 states:Dict[str, Any] | list[Dict[str, Any]], 
                 info:Optional[str | list[str]]=None
                 ) -> Tensor: 
+        '''TODO: Should this be the whole strategy prompt, or just state + info stringified?'''
         states=[states] if isinstance(states, dict) else states
         states=[str(state) for state in states]
         if info is not None: 
             info=[info] if isinstance(info, str) else info
             states=[states+'\n'+info for states, info in zip(states, info)]
+        
         inputs = self.tokenizer(states, **self.tokenizer_call_kwargs)
         outputs = self.model(**inputs)
         last_hidden_states = outputs.last_hidden_state

@@ -39,7 +39,6 @@ class GridEnvironment(gym.Env):
     
     def step(self, action_sequence:List[str]) -> Tuple[Dict[str, int], 
                                                        int, 
-                                                       List[int], 
                                                        bool, 
                                                        str]:
         total_reward = 0
@@ -48,12 +47,14 @@ class GridEnvironment(gym.Env):
         for action in action_sequence:
             if done:
                 break
+
             self.state, reward, done = self._process_action(action)
             total_reward += reward
 
         return self._get_obs(), total_reward, done, f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'
     
     def _process_action(self, action_command:str) -> Tuple[Tuple[int], int, bool]:
+
         assert action_command in ['move forward', 'turn left'], \
             f'Invalid Action: Must Choose from [move forward, turn left]'
         
@@ -109,8 +110,6 @@ if __name__=="__main__":
     obs = env.reset()
     action_seq=['turn left', 'turn left', 'move forward', 'move forward', 'move forward', 'move forward']
     obs, tot_reward, rewards, done = env.step(action_seq)
-
-    
 
     values=[1, 1, 1, 1, 1]
     

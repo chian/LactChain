@@ -366,7 +366,7 @@ class LactChainA(LactChain):
             def __init__(self,llm):
                 self.llm = llm
                 self.move_prompt = dedent("""\
-                    You are in gridworld. Make a move to help you reach the goal. 
+                    <s>[INST] You are in gridworld. Make a move to help you reach the goal. 
                     Your response must be some kind of move, even if you have to guess. 
                     """)
             def execute(self,context=None):
@@ -400,7 +400,8 @@ class LactChainA(LactChain):
             
                 Your final answer should be in the format of a python list 
                 of moves, where each move is one of the 2 types listed above.
-                E.g. ['move forward', 'turn left']
+                E.g. ['move forward', 'turn left']                                 
+                [INST]
                 """)
                 # Fill in the placeholder in the prompt template
                 self.prompt = self.convert_prompt_template.format(strategy=outer_message)

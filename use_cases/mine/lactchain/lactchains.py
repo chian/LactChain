@@ -1,7 +1,7 @@
 import sys, os
 from langchain_community.llms import Ollama
 from textwrap import dedent
-from typing import Any, List, Union, Dict, Optional, Literal
+from typing import Any, List, Union, Dict, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 from langchain.schema import OutputParserException
@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 import torch, torch.nn as nn, torch.nn.functional as F
 import pprint as pp
+import json
 sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
 from classes.lactchain import LactChain, Context, Component
 from langchain_core.prompts import PromptTemplate
@@ -45,20 +46,32 @@ STRATEGY=dedent("""\
             """)
 
 PROMPT_TEMPLATE=dedent("""\
+            <s>[INST]
             There are only 2 types of moves you can make:
             
             1. move forward
             2. turn left
             
             Come up with a combination of those two moves in order
-            to successfully carry out the action: {strategy}
+            to successfully carry out the task:
+            {strategy}
             
             Your final answer should be in the format of a python list 
             of moves, where each move is one of the 2 types listed above.
-            E.g. ['move forward', 'turn left']. 
-                                              
+            E.g. ["move forward", "turn left"]. DO NOT CHOOSE ANY OTHER TYPES OF MOVES 
+            OR YOU WILL BE PUNISHED
+
+            All of your output must be stored in a json in the following format, and nothing else: 
+            {{
+            "explain": "// Your explanation and logic goes here //"
+            "moves": // Your sequence of moves goes here //
+            }} 
+            YOU ARE NOT ALLOWED TO OUTPUT ANYTHING ELSE THAT DOES NOT STRICTLY ADHERE TO THE JSON FORMAT ABOVE.
+            TAKE NOTE THAT THE KEYS IN YOUR JSON OUTPUT SHOULD BE IN DOUBLE QUOTES
+                       
             Here is your current position in grid world: {position}
             Here is some extra information of grid world: {info}
+            [INST]
             """)
 
 class Strategy(object): 
@@ -93,7 +106,7 @@ class MyLactChain(nn.Module):
                  ): 
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
-        self.strategy=Strategy(PROMPT_TEMPLATE, STRATEGY)
+        self._strategy=Strategy(PROMPT_TEMPLATE, STRATEGY)
 
         backends={
             'langchain':LangChainGenerator,
@@ -105,39 +118,63 @@ class MyLactChain(nn.Module):
 
         if config.backend=='langchain': 
             config.langchainconfig.model=model
-            self.generator=_generator(**config.langchainconfig.model_dump())
+            generator=_generator(**config.langchainconfig.model_dump())
+            self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
+            self.format_instructions = self.pydantic_parser.get_format_instructions()
+            
         elif config.backend=='huggingface': 
             config.huggingfaceconfig.pretrained_model_name_or_path=model
-            self.generator=_generator(config.huggingfaceconfig)
-        elif config.backend=='vllm': 
-            config.vllmconfig.llm_name=model
-            self.generator=_generator(config.backend)(**config.vllmconfig.model_dump())
+            generator=_generator(config.huggingfaceconfig)
+            
+        self.generator=generator
 
-        self.pydantic_parser = PydanticOutputParser(pydantic_object=ListOfMoves)
-        self.format_instructions = self.pydantic_parser.get_format_instructions()
+            
+    @property
+    def show_strategy(self) -> str: 
+        return self._strategy
 
-    def sample_actions(self, 
-                       states:Dict[str, Any] | list[Dict[str, Any]], 
-                       infos:str | list[str]
-                       ) -> list[str]: 
+    def parse_outputs(self, outputs:list[str]) -> list[str]: 
+        try: 
+            return [json.loads(output) for output in outputs]
+        except Exception as e: 
+            return dedent(f'''Your output string is not correctly formatted for {pp.pformat(outputs)}. 
+                            Here is the error{e}''')
+        
+    def sample_action(self, 
+                      states:Dict[str, Any], 
+                      infos:str 
+                    ) -> Tuple[list[str], str]: 
         strategies=[]
         states=[states] if isinstance(states, dict) else states
         infos=[infos] if isinstance(infos, str) else infos
         for (state, info) in zip(states, infos): 
-            strategy=self.strategy(state, info)
+            strategy=self._strategy(state, info)
             strategies.append(strategy)
-        outputs=self.generator.generate(strategies)
-        return outputs
+        outputs=self.generator(strategies)
+        parsed_outputs=self.parse_outputs(outputs)
+        action=parsed_outputs[0]['moves'] # 0 since we are assuming list of actions is just [action]
+        context=parsed_outputs[0]['explain']
+        return action, context
+
+    def sample_dual_actions(self): 
+
+        ...
 
 
 if __name__=="__main__": 
 
+    output='''{"explain":"Hlleo", "actions":["move right", "move left"]}'''
+
     policy_config=PolicyConfig()
-    lactchain=MyLactChain(policy_config, 
-                          "meta-llama/Meta-Llama-3-70B-Instruct", './')
-    states=["x=10, y=5, orientation=right", "x = 20, y=0, orientation=left"]
-    states=[{'x':10, 'y':5, 'orientation':'right'}, {'x':3, 'y':5, 'orientation':'left'}]
-    info=['grid world is size 15, 15', 'grid world is size 40x10']
+    lactchain=MyLactChain(policy_config, "mistralai/Mistral-7B-Instruct-v0.3", './')
+    states=[
+        {'x':10, 'y':5, 'orientation':'right'}, 
+        {'x':3, 'y':5, 'orientation':'left'}
+        ]
+    info=[
+        'grid world is size 15, 15', 
+        'grid world is size 40x10'
+        ]
     outputs=lactchain.sample_actions(states, info)
 
     breakpoint()

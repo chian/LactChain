@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import torch
+from torch import nn
 from typing import Literal, Union, TypeVar, Optional, Dict, Any
 from pathlib import Path
 from pydantic import Field
@@ -81,12 +82,15 @@ class HuggingFaceGeneratorConfig(BaseConfig):
     )
 
 
-class MyHuggingFaceGenerator:
+class MyHuggingFaceGenerator(nn.Module):
     """Language model generator using hugging face backend."""
 
     def __init__(self, config: HuggingFaceGeneratorConfig, 
                  model_kwargs:Optional[Dict[str, Any]]=None, 
                  pipeline_kwargs:Optional[Dict[str, Any]]=None) -> None:
+        
+        super().__init__()
+        
         """Initialize the HuggingFaceGenerator."""
         import torch
         from transformers import AutoTokenizer
@@ -95,7 +99,7 @@ class MyHuggingFaceGenerator:
         from transformers import pipeline
         from langchain_core.prompts import PromptTemplate
 
-        model_kwargs={'device_map':'auto'}
+        model_kwargs={}
 
         self.tokenizer_call_kwargs={'return_tensors':'pt', 
                                     'padding':'longest'}
@@ -145,6 +149,10 @@ class MyHuggingFaceGenerator:
         self.model = model
         self.tokenizer = tokenizer
         self.config = config
+        
+    def forward(self, prompts:str | list[str]) -> list[str]: 
+        '''Forward function for outputs'''
+        return self.generate(prompts)
 
     def _generate_batch(self, prompts:list[str], **kwargs:Optional[Dict[str, Any]]) -> list[str]: 
         '''generates batch outputs and then filters out attached input prompt via token slicing'''
@@ -184,6 +192,7 @@ class MyHuggingFaceGenerator:
         for batch in batch_data(prompts, self.config.batch_size):
             responses.extend(self._generate_batch(batch))
         return responses
+
     
 if __name__=="__main__": 
 

@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, Dataset
 from datasets import Dataset as HFDataset, concatenate_datasets
 from torch import Tensor
 import sys, os
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+sys.path.append(os.getcwd()+'/../../../')
 
 
 class DPODataset(HFDataset): 

@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import torch, torch.nn as nn, torch.nn.functional as F
 import pprint as pp
 import json
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+sys.path.append(os.getcwd()+'/../../../')
 from classes.lactchain import LactChain, Context, Component
 from langchain_core.prompts import PromptTemplate
 from use_cases.mine.lactchain.config import BaseConfig

@@ -7,14 +7,13 @@ from typing import Literal, Union, TypeVar, Optional, Dict, Any
 from pathlib import Path
 from pydantic import Field
 import sys, os
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+sys.path.append(os.getcwd()+'/../../../')
 
 from use_cases.mine.lactchain.config import BaseConfig
 
 PathLike = Union[str, Path]
 
 T = TypeVar('T')
-
 
 def batch_data(data: list[T], chunk_size: int) -> list[list[T]]:
     """Batch data into chunks of size chunk_size.

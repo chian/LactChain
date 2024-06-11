@@ -2,7 +2,7 @@ import sys, os
 from gymnasium import spaces
 import gymnasium as gym
 
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain')
+sys.path.append(os.getcwd()+'/../../../')
 from classes.environment import AbstractEnvironment
 from classes.reward import AbstractRewardFunction
 from typing import Tuple, Any, Dict, List

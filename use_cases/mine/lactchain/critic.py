@@ -9,7 +9,7 @@ from typing import Any, Union, Dict, Tuple, List, Optional, Literal
 from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
 from transformers import BitsAndBytesConfig
 from torch import Tensor
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+sys.path.append(os.getcwd()+'/../../../')
 from classes.learning import LearningScheme
 from use_cases.mine.lactchain.config import BaseConfig
 

@@ -133,9 +133,8 @@ class MyLactChain(nn.Module):
                 
         self.generator=generator
 
-    # @property
-    # def strategy(self) -> str: 
-    #     return self._strategy
+    def compile_prompt(self, state:str, info:str) -> str: 
+        return self._strategy(state, info)
     
     # @strategy.setter
     # def strategy(self, strategy:str) -> None: 

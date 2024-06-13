@@ -26,7 +26,6 @@ def sample_data(actor:MyLactChain=None,
     '''
     NUM_EPISODES=1000
     MAX_STEPS=15
-    
     BATCH_SIZE=64
     
     coord_space_prob=torch.from_numpy(env.coord_set_probability)
@@ -56,29 +55,30 @@ def sample_one_shot_trajectories(actor:MyLactChain=None,
     rand_indices=torch.randint(0, sampled_states.size(0), (2,))
     sampled_state_tensor=sampled_states[rand_indices]
 
-    sampled_states=[]
-    sampled_infos=[]
+    prompts=[]
+    chosens=[]
+    rejects=[]
     for (x, y, orientation), info in zip(sampled_state_tensor, infos): 
         state={'x':x, 'y':y, 'orientation':orientation}
-        sampled_states.append(state)
-        sampled_infos.append(info)
+        actions, contexts=actor.sample_actions([state]*2,[info]*2)
+        out1, reward1, done1, info1=env.step(actions[0])
+        _, _ = env.reset()
+        out2, reward2, done2, info2=env.step(actions[1])
+        values=critic([out1, out2], [info1, info2])
+        advantages=torch.tensor([reward1, reward2]) - values
+        advantage_idx=torch.where(advantages>advantages.min().item())[0].item()
+
+        dataset=HFDataset.from_dict({'prompt':[actor.compile_prompt(state, info)], 'chosen':[str(actions[advantage_idx])],'rejected':[str(actions[advantage_idx])]})
+        breakpoint()
+
     
-    actions, contexts=actor.sample_actions(sampled_states, sampled_infos)
-    breakpoint()
-    out1, reward1, done1, info1=env.step(actions[0])
-    env.reset()
-    out2, reward2, done2, info2=env.step(actions[1])
-    
-    breakpoint()
-    
-    values=critic([out1, out2], [info1, info2])
-    
-    advantages=torch.tensor([reward1, reward2]) - values
-    
-    # actions
-    
-    dataset=HFDataset.from_dict({'prompt':..., 'chosen':...,'rejected':...})
-    
+    # actions, contexts=actor.sample_actions(sampled_states, sampled_infos)
+    # out1, reward1, done1, info1=env.step(actions[0])
+    # env.reset()
+    # out2, reward2, done2, info2=env.step(actions[1])
+    # values=critic([out1, out2], [info1, info2])
+    # advantages=torch.tensor([reward1, reward2]) - values
+    # dataset=HFDataset.from_dict({'prompt':..., 'chosen':...,'rejected':...})
     
     breakpoint()
     ...

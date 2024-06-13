@@ -165,10 +165,22 @@ class MyLactChain(nn.Module):
         context=parsed_outputs[0]['explain']
         return action, context
 
-    def sample_dual_actions(self): 
+    def sample_actions(self, 
+                      states:Dict[str, Any], 
+                      infos:str 
+                    ) -> Tuple[list[str], str]: 
+        strategies=[]
+        states=[states] if isinstance(states, dict) else states
+        infos=[infos] if isinstance(infos, str) else infos
+        for (state, info) in zip(states, infos): 
+            strategy=self._strategy(state, info)
+            strategies.append(strategy)
 
-        ...
-
+        outputs=self.generator.generate(strategies)
+        parsed_outputs=self.parse_outputs(outputs)
+        actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
+        contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
+        return actions, contexts
 
 if __name__=="__main__": 
 

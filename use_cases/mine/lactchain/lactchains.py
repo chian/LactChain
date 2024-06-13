@@ -12,6 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import torch, torch.nn as nn, torch.nn.functional as F
 import pprint as pp
 import json
+from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
 sys.path.append(os.getcwd()+'/../../../')
 from classes.lactchain import LactChain, Context, Component
 from langchain_core.prompts import PromptTemplate
@@ -19,7 +20,7 @@ from use_cases.mine.lactchain.config import BaseConfig
 from use_cases.mine.lactchain.langchain_backend import LangChainGenerator, GeneratorConfig
 from use_cases.mine.lactchain.vllm_backend import VLLMGenerator, VLLMGeneratorConfig
 from use_cases.mine.lactchain.huggingface_backend import HuggingFaceGenerator, HuggingFaceGeneratorConfig
-from use_cases.mine.lactchain.my_huggingface_backend import MyHuggingFaceGenerator
+from use_cases.mine.lactchain.my_huggingface_backend import MyHuggingFaceGenerator, LoraConfigSettings
 ############################################################################
 
 class PolicyConfig(BaseConfig): 
@@ -100,9 +101,10 @@ class Strategy(object):
 
 class MyLactChain(nn.Module): 
     def __init__(self,
-                 config:PolicyConfig,
                  model:str, 
-                 cache_dir:str
+                 config:PolicyConfig,
+                 lora_config:Optional[LoraConfigSettings]=None,
+                 cache_dir:Optional[str]=None
                  ): 
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
@@ -124,14 +126,20 @@ class MyLactChain(nn.Module):
             
         elif config.backend=='huggingface': 
             config.huggingfaceconfig.pretrained_model_name_or_path=model
-            generator=_generator(config.huggingfaceconfig)
-            
+            if lora_config: 
+                generator=_generator(config.huggingfaceconfig, lora_config)
+            else: 
+                generator=_generator(config.huggingfaceconfig)
+                
         self.generator=generator
 
-            
-    @property
-    def show_strategy(self) -> str: 
-        return self._strategy
+    # @property
+    # def strategy(self) -> str: 
+    #     return self._strategy
+    
+    # @strategy.setter
+    # def strategy(self, strategy:str) -> None: 
+    #     self._strategy=strategy
 
     def parse_outputs(self, outputs:list[str]) -> list[str]: 
         try: 
@@ -150,7 +158,8 @@ class MyLactChain(nn.Module):
         for (state, info) in zip(states, infos): 
             strategy=self._strategy(state, info)
             strategies.append(strategy)
-        outputs=self.generator(strategies)
+
+        outputs=self.generator.generate(strategies)
         parsed_outputs=self.parse_outputs(outputs)
         action=parsed_outputs[0]['moves'] # 0 since we are assuming list of actions is just [action]
         context=parsed_outputs[0]['explain']

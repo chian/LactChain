@@ -1,11 +1,12 @@
 import sys, os
 from gymnasium import spaces
 import gymnasium as gym
-
+import numpy as np
 sys.path.append(os.getcwd()+'/../../../')
 from classes.environment import AbstractEnvironment
 from classes.reward import AbstractRewardFunction
 from typing import Tuple, Any, Dict, List
+
 
 class GridEnvironment(gym.Env): 
     def __init__(self, 
@@ -18,15 +19,30 @@ class GridEnvironment(gym.Env):
         Action Space (2): [move forward, turn left]
         Orientation ()
         '''
+
         self.grid_size=grid_size
         self.action_space=spaces.Discrete(2) # action space: move forward or turn left 
         self.num_orientations=4 # assume number of orientations is 4
         self.observation_space=spaces.MultiDiscrete([self.grid_size, 
                                                     self.grid_size, 
                                                     self.num_orientations]) # 
+
+        self.orientation_set_probability=np.ones(self.num_orientations) / self.num_orientations
         self.goal_position=goal_position
         self.state=None
         self.reset()
+        
+    @property
+    def grid_size(self) -> int: 
+        return self._grid_size 
+        
+    @grid_size.setter
+    def grid_size(self, grid_size:int) -> None: 
+        self._grid_size=grid_size
+        
+    @property
+    def coord_set_probability(self) -> np.ndarray: 
+        return np.ones(self._grid_size) / self._grid_size
 
     def reset(self) -> Tuple[Dict[str, Any], str]: 
         self.state={'x':0, 'y':0, 'orientation':0} # ressetting state
@@ -99,6 +115,37 @@ class GridEnvironment(gym.Env):
     
 
 if __name__=="__main__": 
+    
+    
+    
+    class Celsius:
+        def __init__(self, temperature=0):
+            # Calls the setter method to set the initial value
+            self.temperature = temperature
+            self.temperature_info = np.arange(self.temperature)
+
+        def to_fahrenheit(self):
+            return (self.temperature * 1.8) + 32
+
+        @property
+        def temperature(self):
+            # Getter method called when you access c.temperature
+            print("Getting value...")
+            return self._temperature
+
+        @temperature.setter
+        def temperature(self, value):
+            # Setter method called when you set c.temperature = value
+            print("Setting value...")
+            if value < -273.15:
+                raise ValueError("Temperature below -273 is not possible")
+            self._temperature = value
+    
+    
+    
+    breakpoint()
+    
+    
     sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
     from use_cases.mine.lactchain.dataset import QLearningDataset
 

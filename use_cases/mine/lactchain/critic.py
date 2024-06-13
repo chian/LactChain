@@ -27,13 +27,12 @@ class ValueFunctionConfig(BaseConfig):
     lora_config_settings:LoraConfigSettings=Field(default_factory=LoraConfigSettings)
     printer:bool=Field(True)
     max_seq_length:int=Field(128)
-    model_name:str=Field('meta-llama/Meta-Llama-3-8B')
-    tokenizer_name:str=Field('meta-llama/Meta-Llama-3-8B')
     torch_dtype:str=Field('torch.float32')
 
 class ValueFunction(nn.Module): 
     '''Config is type ValueFunctionConfig class and will dump sub-configs or attr into the model'''
     def __init__(self, 
+                 model_name:str,
                  config:ValueFunctionConfig
                  ): 
         super().__init__()
@@ -46,11 +45,11 @@ class ValueFunction(nn.Module):
         # model setup 
         self.lora_config=LoraConfig(**config.lora_config_settings.model_dump())
         if config.peft_type=='lora': 
-            _trunk_model=AutoModel.from_pretrained(config.model_name, torch_dtype=torch.float32)
+            _trunk_model=AutoModel.from_pretrained(model_name, torch_dtype=torch.float32)
             self.model=LoraModel(_trunk_model, self.lora_config, "default")
         elif config.peft_type=='qlora':
             _quant_config=BitsAndBytesConfig(load_in_8bit=True)
-            _trunk_model=AutoModel.from_pretrained(config.model_name, 
+            _trunk_model=AutoModel.from_pretrained(model_name, 
                                                    torch_dtype=torch.float32, 
                                                    quantization_config=_quant_config)
             _model = prepare_model_for_kbit_training(_trunk_model)
@@ -59,20 +58,11 @@ class ValueFunction(nn.Module):
         self.q_value_head = nn.Linear(self.model.config.hidden_size, 1)
 
         # tokenizer setup
-        self.tokenizer=AutoTokenizer.from_pretrained(config.tokenizer_name)
+        self.tokenizer=AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.model_max_length = min(self.model.config.max_position_embeddings, 
                                               config.max_seq_length)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-
-    def __repr__(self):
-        PEFT_CONFIG=self.config.lora_config if self.config.lora_config is not None else "None"
-        return dedent(f'''
-                      Model Type: {self.config.model_name}, 
-                      PEFT Config: {PEFT_CONFIG},
-                      Tokenizer: {self.config.tokenizer_name}, 
-                      Trainable Parameters: {self.model.print_trainable_parameters()}
-                      ''')
 
     def forward(self, 
                 states:Dict[str, Any] | list[Dict[str, Any]], 

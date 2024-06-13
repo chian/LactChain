@@ -57,8 +57,7 @@ class DPOCollator(object):
 
         batch = [self.tokenizer(prompt, **self.call_kwargs) 
                  for prompt in batch]
-        breakpoint()
-        return {}
+        return batch
 
     
 if __name__=="__main__": 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 import torch
 from torch import nn
-from typing import Literal, Union, TypeVar, Optional, Dict, Any
+from typing import Literal, Union, TypeVar, Optional, Dict, Any, List
 from pathlib import Path
 from pydantic import Field
 import sys, os
+from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
 sys.path.append(os.getcwd()+'/../../../')
 
 from use_cases.mine.lactchain.config import BaseConfig
@@ -38,6 +39,13 @@ def batch_data(data: list[T], chunk_size: int) -> list[list[T]]:
         batches.append(data[len(batches) * chunk_size :])
     return batches
 
+class LoraConfigSettings(BaseConfig): 
+    r:int=Field(8)
+    lora_alpha:int=Field(32)
+    target_modules:List[str]=Field(["q_proj", "v_proj", "k_proj", "o_proj"])
+    lora_dropout:float=Field(0.05)
+    bias:str=Field('all')
+    task_type:str=Field("CAUSAL_LM")
 
 class HuggingFaceGeneratorConfig(BaseConfig):
     """Configuration for the HuggingFaceGenerator."""
@@ -81,12 +89,15 @@ class HuggingFaceGeneratorConfig(BaseConfig):
     )
 
 
-class MyHuggingFaceGenerator(nn.Module):
+class MyHuggingFaceGenerator:
     """Language model generator using hugging face backend."""
 
-    def __init__(self, config: HuggingFaceGeneratorConfig, 
+    def __init__(self, 
+                 config: HuggingFaceGeneratorConfig,
+                 lora_config:Optional[LoraConfigSettings]=None, 
                  model_kwargs:Optional[Dict[str, Any]]=None, 
-                 pipeline_kwargs:Optional[Dict[str, Any]]=None) -> None:
+                 pipeline_kwargs:Optional[Dict[str, Any]]=None
+                 ) -> None:
         
         super().__init__()
         
@@ -124,6 +135,9 @@ class MyHuggingFaceGenerator(nn.Module):
             config.pretrained_model_name_or_path,
             trust_remote_code=True,
         )
+        if lora_config: 
+            lora_config=LoraConfig(**lora_config.model_dump())
+            model=LoraModel(model, lora_config, adapter_name='default')
 
         # Set the model max length for proper truncation
         tokenizer.model_max_length = model.config.max_position_embeddings
@@ -143,15 +157,18 @@ class MyHuggingFaceGenerator(nn.Module):
         # Compile the model for faster inference
         if config.compile_model:
             model = torch.compile(model, fullgraph=True)
-
+            
+        model.generation_config.pad_token_id = tokenizer.pad_token_id
         # Set persistent attributes
         self.model = model
         self.tokenizer = tokenizer
-        self.config = config
+        self._config = config
+        self._lora_config=lora_config
         
-    def forward(self, prompts:str | list[str]) -> list[str]: 
-        '''Forward function for outputs'''
-        return self.generate(prompts)
+    @property
+    def show_configs(self) -> Dict[str, Any]: 
+        return {'model':self._config, 
+                'lora':self._lora_config}
 
     def _generate_batch(self, prompts:list[str], **kwargs:Optional[Dict[str, Any]]) -> list[str]: 
         '''generates batch outputs and then filters out attached input prompt via token slicing'''
@@ -188,7 +205,7 @@ class MyHuggingFaceGenerator(nn.Module):
         """
         prompts=[prompts] if isinstance(prompts, str) else prompts
         responses = []
-        for batch in batch_data(prompts, self.config.batch_size):
+        for batch in batch_data(prompts, self._config.batch_size):
             responses.extend(self._generate_batch(batch))
         return responses
 

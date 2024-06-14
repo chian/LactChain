@@ -5,7 +5,7 @@ import torch, torch.nn as nn, torch.nn.functional as F
 import gymnasium as gym
 from datasets import Dataset as HFDataset, concatenate_datasets
 from argparse import ArgumentParser
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+sys.path.append(os.getcwd()+'/../../../')
 from classes.lactchain import LactChain, Context, Component
 from use_cases.mine.lactchain.environment import GridEnvironment
 from use_cases.mine.lactchain.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
@@ -53,7 +53,6 @@ def sample_one_shot_trajectories(actor:MyLactChain=None,
         out2, reward2, _, info2=env.step(actions[1])
         values=critic([out1, out2], [info1, info2])
         advantages=torch.tensor([reward1, reward2]) - values
-        breakpoint()
         advantage_idx=torch.where(advantages>advantages.min().item())[0].item()
         
         prompts.append(actor.compile_prompt(state, info))

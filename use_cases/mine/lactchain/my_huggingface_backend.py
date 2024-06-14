@@ -109,7 +109,7 @@ class MyHuggingFaceGenerator:
         from transformers import pipeline
         from langchain_core.prompts import PromptTemplate
 
-        model_kwargs={}
+        model_kwargs={'device_map':'auto'}
 
         self.tokenizer_call_kwargs={'return_tensors':'pt', 
                                     'padding':'longest'}

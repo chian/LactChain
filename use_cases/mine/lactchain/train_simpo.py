@@ -25,7 +25,7 @@ from argparse import ArgumentParser
 from alignment.data import maybe_insert_system_message, is_openai_format
 from peft import PeftConfig, PeftModel
 from transformers import BitsAndBytesConfig
-sys.path.append('/nfs/lambda_stor_01/homes/bhsu/2024_research/LactChain/')
+sys.path.append(os.getcwd()+'/../../../')
 from classes.lactchain import LactChain, Context, Component
 from use_cases.mine.lactchain.environment import GridEnvironment
 from use_cases.mine.lactchain.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
@@ -59,9 +59,9 @@ def argparse() -> Tuple[Any]:
 def get_models(args:ArgumentParser, 
               actor_config:PolicyConfig, 
               lora_config:Optional[LoraConfigSettings]
-              ) -> AutoModelForCausalLM, AutoTokenizer:
+              ) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
     
-    model_kwargs={}
+    model_kwargs={'device_map':'auto'}
     
     if args.bits_and_bytes: 
         nf4_config = BitsAndBytesConfig(

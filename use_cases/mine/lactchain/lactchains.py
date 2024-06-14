@@ -103,8 +103,7 @@ class MyLactChain(nn.Module):
     def __init__(self,
                  model:str, 
                  config:PolicyConfig,
-                 lora_config:Optional[LoraConfigSettings]=None,
-                 cache_dir:Optional[str]=None
+                 lora_config:Optional[LoraConfigSettings]=None
                  ): 
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
@@ -136,10 +135,6 @@ class MyLactChain(nn.Module):
     def compile_prompt(self, state:str, info:str) -> str: 
         return self._strategy(state, info)
     
-    # @strategy.setter
-    # def strategy(self, strategy:str) -> None: 
-    #     self._strategy=strategy
-
     def parse_outputs(self, outputs:list[str]) -> list[str]: 
         try: 
             return [json.loads(output) for output in outputs]

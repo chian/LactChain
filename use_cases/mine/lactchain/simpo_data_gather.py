@@ -53,6 +53,7 @@ def sample_one_shot_trajectories(actor:MyLactChain=None,
         out2, reward2, _, info2=env.step(actions[1])
         values=critic([out1, out2], [info1, info2])
         advantages=torch.tensor([reward1, reward2]) - values
+        print(f'Advantages: {advantages}')
         advantage_idx=torch.where(advantages>advantages.min().item())[0].item()
         
         prompts.append(actor.compile_prompt(state, info))
@@ -63,7 +64,7 @@ def sample_one_shot_trajectories(actor:MyLactChain=None,
 
 def argparse() -> Any: 
     argparse=ArgumentParser()
-    argparse.add_argument('--data_save_path', type=str, default='./')
+    argparse.add_argument('--data_save_path', type=str, default='./datasets/')
     argparse.add_argument('--actor_path', type=str, 
                           default='./models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de')
     argparse.add_argument('--critic_path', type=str, 

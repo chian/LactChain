@@ -1,5 +1,5 @@
 
-import gymnasium as gym
+# import gymnasium as gym
 from typing import List, Callable, Dict, Any, Tuple, Optional
 import sys, os
 from dataclasses import dataclass, field
@@ -8,21 +8,13 @@ import transformers
 from transformers import AutoModelForCausalLM, set_seed, AutoTokenizer
 from peft import LoraConfig, LoraModel
 from datasets import load_from_disk
-from alignment import (
-    DataArguments,
-    DPOConfig,
-    H4ArgumentParser,
-    ModelArguments,
-    get_checkpoint,
-    get_datasets,
-    get_kbit_device_map,
-    get_peft_config,
-    get_quantization_config,
-    get_tokenizer,
-    is_adapter_model,
-)
+# from alignment import (
+#     # DataArguments,
+#     # DPOConfig,
+#     H4ArgumentParser,
+#     ModelArguments,
+# )
 from argparse import ArgumentParser
-from alignment.data import maybe_insert_system_message, is_openai_format
 from peft import PeftConfig, PeftModel
 from transformers import BitsAndBytesConfig
 sys.path.append(os.getcwd()+'/../../../')
@@ -31,8 +23,11 @@ from use_cases.mine.lactchain.environment import GridEnvironment
 from use_cases.mine.lactchain.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from use_cases.mine.lactchain.lactchains import MyLactChain, PolicyConfig
 from use_cases.mine.lactchain.dataset import DPODataset
-from use_cases.mine.lactchain.SimPOTrainer import SimPOTrainer
-
+from use_cases.mine.lactchain.simpo_trainer import SimPOTrainer
+from use_cases.mine.lactchain.my_dpo_config import DPOConfig
+from use_cases.mine.lactchain.dpo_collator import DPODataCollatorWithPadding
+# from use_cases.mine.lactchain.my_huggingface_backend import LoraConfig
+from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
 
 @dataclass
 class SimPOConfig(DPOConfig):
@@ -40,21 +35,9 @@ class SimPOConfig(DPOConfig):
         default=0.5,
         metadata={"help": "The target reward margin term in SimPO loss."},
     )
-    
-    
-def argparse() -> Tuple[Any]: 
-    argparse=ArgumentParser()
-    argparse.add_argument('--train_data_path', type=str, default='./')
-    argparse.add_argument('--actor_path', type=str, 
-                          default='./models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de')
-    argparse.add_argument('--bits_and_bytes', type=bool, default=True)
-    argparse.add_argument('--lora', type=bool, default=True)
-    argparse.add_argument('--half_precision', type=bool, default=True)
-    args=argparse.parse_args()
-    
-    hfparser=H4ArgumentParser((ModelArguments, DataArguments, SimPOConfig))
-    model_args, data_args, training_args = hfparser.parse()
-    return args, model_args, data_args, training_args
+    output_dir: Optional[str]=field(
+        default='./'
+    )
 
 def get_models(args:ArgumentParser, 
               actor_config:PolicyConfig, 
@@ -95,39 +78,76 @@ def get_models(args:ArgumentParser,
     return model, tokenizer
     
     
+    
+def argparse() -> Tuple[Any]: 
+    argparse=ArgumentParser()
+    argparse.add_argument('--train_data_path', type=str, default='./datasets/')
+    argparse.add_argument('--actor_path', type=str, 
+                          default='./models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de')
+    argparse.add_argument('--bits_and_bytes', type=bool, default=True)
+    argparse.add_argument('--lora', type=bool, default=True)
+    argparse.add_argument('--half_precision', type=bool, default=True)
+    argparse.add_argument('--output_dir', type=str, default='./')
+    args=argparse.parse_args()
+    
+    # hfparser=H4ArgumentParser((ModelArguments, DataArguments, SimPOConfig))
+    # model_args, data_args, training_args = hfparser.parse()
+    
+    return args
+    
 def main():
     
-    args, model_args, data_args, training_args = argparse()
+    args = argparse()
     
+    training_args = SimPOConfig()
+
     set_seed(training_args.seed)
     
     train_dataset=load_from_disk(args.train_data_path)
+    # train_dataset.set_format("torch", columns=['prompt', 'chosen', 'rejected'], device="cuda")
     
+    print(f'TYPE DATASET {type(train_dataset)}')
+
     lora_config=LoraConfigSettings()
     actor_config=PolicyConfig() 
     
     model, tokenizer = get_models(args, actor_config, lora_config)
-    
+    # breakpoint()
     ref_model=None
+    
+    # model_kwargs = dict(
+    # revision=model_args.model_revision,
+    # trust_remote_code=model_args.trust_remote_code,
+    # use_flash_attention_2=model_args.use_flash_attention_2,
+    # torch_dtype=torch_dtype,
+    # use_cache=False if training_args.gradient_checkpointing else True,
+    # device_map=get_kbit_device_map() if quantization_config is not None else None,
+    # quantization_config=quantization_config,
+    # )
+    lora_config_settings=LoraConfigSettings()
+    lora_config=LoraConfig(**lora_config_settings.model_dump())
+    data_collator=DPODataCollatorWithPadding()
 
     trainer = SimPOTrainer(model=model,
                         ref_model=ref_model, # pass in to bypass DPO Trainer check for ref model but is not actually used
-                        # model_init_kwargs=model_kwargs,
+                        model_init_kwargs=training_args.model_init_kwargs, # model_kwargs
                         args=training_args,
                         beta=training_args.beta,
                         train_dataset=train_dataset,
                         tokenizer=tokenizer,
                         max_length=training_args.max_length,
                         max_prompt_length=training_args.max_prompt_length,
-                        peft_config=get_peft_config(model_args),
-                        loss_type=training_args.loss_type,
+                        # loss_type=training_args.loss_type,
+                        peft_config=lora_config, 
+                        # data_collator=data_collator
                         )
     
     trainer.train()
+    trainer.save_model(training_args.output_dir)
     
     print(f'FINISHED TRAINING')
     
-    
+    # pip install transformers==4.38.2
 if __name__=="__main__": 
     
     main()

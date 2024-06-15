@@ -64,17 +64,16 @@ class GridEnvironment(gym.Env):
         total_reward = 0
         done = False
 
-        for action in action_sequence:
+        for action_command in action_sequence:
             if done:
                 break
-
-            self.state, reward, done = self._process_action(action)
+            self.state, reward, done = self._process_action(action_command)
             total_reward += reward
 
         return self._get_obs(), total_reward, done, f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'
     
     def _process_action(self, action_command:str) -> Tuple[Tuple[int], int, bool]:
-
+        
         assert action_command in ['move forward', 'turn left'], \
             f'Invalid Action: Must Choose from [move forward, turn left]'
         
@@ -105,8 +104,9 @@ class GridEnvironment(gym.Env):
         self.state = {'x': x, 'y': y, 'orientation': orientation}
         reward = self._compute_reward()
         done = self._goal_criteria()
-
+        
         return self._get_obs(), reward, done
+        
     
     def _compute_reward(self):
         if self.state['x'] == self.goal_position and self.state['y'] == self.goal_position:

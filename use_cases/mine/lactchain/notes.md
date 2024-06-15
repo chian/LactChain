@@ -111,3 +111,8 @@ Intuition:
 We use advantage to bootstrap DPO chosen and rejected because....
 Gridworld returns (0) reward (negative reward in this case) up until you get to the goal, where u get a large positive reward. We need the advantage to estimate the "Return" so we can smooth out that signal across time so we do not just end up with a ton of negative rewards that mean nothing so our DPO markings are actually accurate. 
 '''
+
+'''
+Question / Issues: 
+- If I sample one state and 
+'''

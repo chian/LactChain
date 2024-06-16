@@ -4,9 +4,10 @@ import torch
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import torch.nn.functional as F
 import torch.nn as nn
+from transformers import AutoTokenizer, AutoModel
 
 class SimPOTrainer(DPOTrainer):
-
+    """This is a test comment for"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)  # Pass all other arguments using **kwargs
         training_args = kwargs["args"]
@@ -29,7 +30,7 @@ class SimPOTrainer(DPOTrainer):
             The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
         """
         pi_logratios = policy_chosen_logps - policy_rejected_logps
-        gamma_logratios = self.gamma / self.beta 
+        gamma_logratios = self.gamma / self.beta
         pi_logratios = pi_logratios.to(self.accelerator.device)
         logits = pi_logratios - gamma_logratios
 
@@ -49,7 +50,7 @@ class SimPOTrainer(DPOTrainer):
         rejected_rewards = self.beta * policy_rejected_logps.to(self.accelerator.device).detach()
 
         return losses, chosen_rewards, rejected_rewards
-    
+
     def concatenated_forward(
         self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
@@ -81,7 +82,7 @@ class SimPOTrainer(DPOTrainer):
             use_cache=False,
             **model_kwargs,
         ).logits
-        
+
         all_logps_1, all_logps_2 = self.get_batch_logps(
             all_logits,
             concatenated_batch["concatenated_labels"],
@@ -91,7 +92,7 @@ class SimPOTrainer(DPOTrainer):
         )
 
         all_logps = all_logps_1 / all_logps_2
-        
+
         chosen_logps = all_logps[:len_chosen]
         rejected_logps = all_logps[len_chosen:]
 

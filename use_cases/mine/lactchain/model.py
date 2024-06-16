@@ -10,32 +10,35 @@ from use_cases.mine.lactchain.config import BaseConfig
 from use_cases.mine.lactchain.my_huggingface_backend import HuggingFaceGeneratorConfig, MyHuggingFaceGenerator
 
 
-class ActorConfig(BaseConfig): 
+class ActorConfig(BaseConfig):
     generatorconfig:HuggingFaceGeneratorConfig=Field(
         default_factory=HuggingFaceGeneratorConfig
     )
-    
 
-    def __init__(self, model:'str'): 
+
+    def __init__(self, model:'str'):
         super().__init__(model=model)
 
 
-class ActorModelForCausalLM(AutoModelForCausalLM): 
+class ActorModelForCausalLM(AutoModelForCausalLM):
     def __init__(self, config:ActorConfig):
         super().__init__(config)
         self.model=AutoModelForCausalLM
 
-    def forward(self, input_ids, attention_mask, **kwargs): 
-        ...
+    def forward(self, input_ids, attention_mask, **kwargs):
+        return None
 
-
-if __name__=="__main__": 
+if __name__=="__main__":
 
     MODEL="mistralai/Mistral-7B-Instruct-v0.3"
 
     config=AutoConfig.from_pretrained(MODEL)
 
     model=ActorModelForCausalLM(config)
+
+    tokenizer=AutoTokenizer.from_pretrained(pretrained_model_name_or_path=MODEL)
+
+    model=AutoModelForCausalLM.from_pretrained(MODEL)
 
     breakpoint()
     ...

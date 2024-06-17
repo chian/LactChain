@@ -11,6 +11,6 @@ peft
 langchain-community
 langchain-google-genai
 langchain-anthropic
-alignment-handbook
 trl
- 
+python-dotenv
+sentencepiece 

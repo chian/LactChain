@@ -1,5 +1,7 @@
-from typing import List, Callable, Dict, Any, Tuple
+from typing import List, Callable, Dict, Any, Tuple, Union, Optional
+from pathlib import Path
 from torch import Tensor
+import torch, torch.nn as nn, torch.nn.functional as F
 import torch
 import gymnasium as gym
 from datasets import Dataset as HFDataset
@@ -10,6 +12,9 @@ from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConf
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
 
 '''FOR NOW, WE DO NOT DO PARALLELIZE. JUST GET A BASIC VERSION WORKING'''
+
+PathLike=Union[str, Path]
+
 
 def sample_data(env:gym.Env, num_samples:int) -> Tuple[Tensor, list[str]]:
     '''NOTE: GRAB OBSERVATION SET --> TORCH MULTINOMIAL --> SAMPLE
@@ -158,6 +163,7 @@ def sample_one_shot_trajectories(actor:LactChain=None,
 
 def argparse() -> Any:
     argparse=ArgumentParser()
+    argparse.add_argument('--recycle_weights', type=bool, default=True)
     argparse.add_argument('--data_save_path', type=str, default='./datasets/dataset_2')
     argparse.add_argument('--actor_path', type=str,
                           default='./models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de')
@@ -175,7 +181,11 @@ def main():
     actor_config=ActorConfig()
     critic_config=ValueFunctionConfig()
     lora_config=LoraConfigSettings()
-
+    
+    if args.recycle_weights: 
+        actor=LactChain.load_from_checkpoint('./')
+        critic=ValueFunction(args.critic_path, critic_config)
+        
     actor=LactChain(args.actor_path, actor_config, lora_config)
     critic=ValueFunction(args.critic_path, critic_config)
 
@@ -192,8 +202,6 @@ def main():
         dataset=HFDataset.from_dict(data)
         dataset.save_to_disk(args.data_save_path)
         print(f'Data saved at {args.data_save_path}')
-
-
 
 if __name__=="__main__":
 

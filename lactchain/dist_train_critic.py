@@ -4,29 +4,37 @@ import torch
 import gymnasium as gym
 from datasets import Dataset as HFDataset
 from argparse import ArgumentParser
-
+from itertools import count
 from lactchain.environments.grid_world import GridEnvironment
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
 
 def sample_data(env:gym.Env, num_samples:int) -> Tuple[Tensor, list[str]]:
-    print(f'SAMPLING STATE-ACTIONS...')
-    coord_space_prob=torch.from_numpy(env.coord_set_probability)
-    distro_coord_space=torch.distributions.Categorical(coord_space_prob)
+    '''Samples a set of states and information strings used to compile strategy
+    states: {'x':__, 'y':__, 'orientations':__}
+    infos: 'Grid world size is __, you are at state __'
+    '''
+    distro_coord_space=env.coordinate_space_distro
     sampled_coords=distro_coord_space.sample((num_samples, 2))
-
-    orientation_space_prob=torch.from_numpy(env.orientation_set_probability)
-    distro_orientation_space=torch.distributions.Categorical(orientation_space_prob)
+    distro_orientation_space=env.orientation_set_distro
     sampled_orientations=distro_orientation_space.sample((num_samples,))
+    
     infos=[env.info]*num_samples
     sampled_states=torch.cat([sampled_coords, sampled_orientations.unsqueeze(1)], dim=1)
+    
     return sampled_states, infos
 
 def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
     '''Returns a batch of sampled_states
+    Inputs:
+    =======
+    sampled_states: 2-dim tensor of X and Y integers used for compiling prompts as batches
+    infos: list of informations used for compiling prompts as batches
+    
     Outputs:
-    states: list[Dict[str, int]]
-    infos: list[str]
+    =======
+    states: list[Dict[str, int]] of len B
+    infos: list[str] of len B 
     '''
     rand_batch_indices=torch.randint(0, sampled_states.size(0), (batch_size,))
     sampled_state_tensor=sampled_states[rand_batch_indices]
@@ -35,13 +43,18 @@ def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) 
 
     return states, [infos[info] for info in rand_batch_indices]
 
-def batch_sample_actions(states:list[Dict[str, int]], infos:list[int],
-                         actor:LactChain, critic:ValueFunction, env:gym.Env):
-    '''Sample values from batch of states + infos and return a batch of outputs'''
-    from itertools import count
-    breakpoint()
+def batch_sample_trajectories(states:list[Dict[str, int]], 
+                              infos:list[int],
+                              actor:LactChain, 
+                              critic:ValueFunction, 
+                              env:gym.Env
+                              ) -> ...:
+    '''
+    
+    
+    '''
     actions, _=actor.sample_actions(states, infos) # batch B, but each two rows are same
-    breakpoint()
+
     states_critic=[]
     infos_critic=[]
     rewards=[]
@@ -103,8 +116,6 @@ def batch_sample_actions(states:list[Dict[str, int]], infos:list[int],
 
     return {'prompt':prompts, 'chosen':chosens,'rejected':rejects}
 
-
-
 def sample_one_shot_trajectories(actor:LactChain=None,
                                  critic:ValueFunction=None,
                                  env:gym.Env=None,
@@ -149,6 +160,7 @@ def sample_one_shot_trajectories(actor:LactChain=None,
 
 def argparse() -> Any:
     argparse=ArgumentParser()
+    argparse.add_argument('--add_to_data', type=bool, default=True)
     argparse.add_argument('--data_save_path', type=str, default='./datasets/dataset_2')
     argparse.add_argument('--actor_path', type=str,
                           default='./models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de')
@@ -171,15 +183,19 @@ def main():
     critic=ValueFunction(args.critic_path, critic_config)
 
     sampled_states, infos=sample_data(env=env, num_samples=args.num_samples)
-    batch_samples, batch_infos=batch_sample_states(sampled_states, infos, args.batch_size)
-    data=batch_sample_actions(batch_samples, batch_infos, actor, critic, env)
-    breakpoint()
+    # batch_samples, batch_infos=batch_sample_states(sampled_states, infos, args.batch_size)
+    # data=batch_sample_actions(batch_samples, batch_infos, actor, critic, env)
+    # breakpoint()
 
     data=sample_one_shot_trajectories(actor=actor, critic=critic, env=env,
                                       sampled_states=sampled_states, infos=infos,
                                       num_samples=args.num_samples)
 
     if args.data_save_path:
+        
+        if args.save
+        
+        
         dataset=HFDataset.from_dict(data)
         dataset.save_to_disk(args.data_save_path)
         print(f'Data saved at {args.data_save_path}')
@@ -187,6 +203,4 @@ def main():
         
 if __name__=="__main__": 
     
-    
-    
-    breakpoint()
+    main()

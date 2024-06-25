@@ -61,6 +61,11 @@ class ValueFunction(nn.Module):
                                               config.max_seq_length)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+    @classmethod
+    def load_from_checkpoint(cls, checkpoint:str, config:ValueFunctionConfig):
+        critic=cls(checkpoint, config)
+        return critic
 
     def forward(self, 
                 states:Dict[str, Any] | list[Dict[str, Any]], 

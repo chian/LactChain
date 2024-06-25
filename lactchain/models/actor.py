@@ -86,7 +86,7 @@ class LactChain(nn.Module):
     def __init__(self,
                  model:str,
                  config:ActorConfig,
-                 lora_config:Optional[LoraConfigSettings]=None
+                 lora_config:Optional[LoraConfigSettings]=None, 
                  ):
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
@@ -114,6 +114,14 @@ class LactChain(nn.Module):
                 generator=_generator(config.huggingfaceconfig)
 
         self.generator=generator
+        
+    @classmethod
+    def load_from_checkpoint(cls, checkpoint:str, config:ActorConfig, lora_config:LoraConfigSettings): 
+        actor=cls(checkpoint, config, lora_config)
+        return actor
+    
+    def save_model(self, save_path:str): 
+        self.save_pretrained(save_path, from_pt=True) 
 
     def compile_prompt(self, state:str, info:str) -> str:
         return self._strategy(state, info)
@@ -167,6 +175,8 @@ class LactChain(nn.Module):
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
         return actions, contexts
+    
+    
 
 if __name__=="__main__":
 
@@ -178,6 +188,8 @@ if __name__=="__main__":
     actor=LactChain('/nfs/lambda_stor_01/homes/bhsu/huggingface_models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de', 
                     policy_config, 
                     lora_config)
+    
+    
     
 
     breakpoint()

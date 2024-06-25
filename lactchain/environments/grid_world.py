@@ -1,10 +1,11 @@
-import sys, os
+import torch
 from gymnasium import spaces
 import gymnasium as gym
 import numpy as np
 from lactchain.classes.base_environment import AbstractEnvironment
 from lactchain.classes.base_reward import AbstractRewardFunction
 from typing import Tuple, Any, Dict, List
+from torch.distributions import Categorical
 
 class GridEnvironment(gym.Env): 
     def __init__(self, 
@@ -45,6 +46,16 @@ class GridEnvironment(gym.Env):
     @property
     def coord_set_probability(self) -> np.ndarray: 
         return np.ones(self._grid_size) / self._grid_size
+    
+    @property
+    def coordinate_space_distro(self) -> Categorical: 
+        coord_space_prob=torch.from_numpy(self.coord_set_probability)
+        return torch.distributions.Categorical(coord_space_prob)
+    
+    @property 
+    def orientation_set_distro(self) -> Categorical: 
+        orientation_space_prob=torch.from_numpy(self.orientation_set_probability)
+        return torch.distributions.Categorical(orientation_space_prob)
 
     def reset(self) -> Tuple[Dict[str, Any], str]: 
         self.state={'x':0, 'y':0, 'orientation':0} # ressetting state
@@ -105,7 +116,6 @@ class GridEnvironment(gym.Env):
         
         return self._get_obs(), reward, done
         
-    
     def _compute_reward(self):
         if self.state['x'] == self.goal_position and self.state['y'] == self.goal_position:
             return 100

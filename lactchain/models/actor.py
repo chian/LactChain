@@ -176,7 +176,6 @@ class LactChain(nn.Module):
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
         return actions, contexts
     
-    
 
 if __name__=="__main__":
 

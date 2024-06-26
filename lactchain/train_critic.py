@@ -7,11 +7,10 @@ import gymnasium as gym
 from datasets import Dataset as HFDataset
 from argparse import ArgumentParser
 import os, uuid
-from datetime import datetime
+
 from lactchain.environments.grid_world import GridEnvironment
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
-
 
 PathLike=Union[str, Path]
 
@@ -85,9 +84,6 @@ def train_critic(actor:LactChain,
         print(f'Episode {episode+1} Loss: {critic_loss}')
         print(f'Episode {episode+1} Total Reward: {cumulative_returns.mean()}')
 
-        # Generate a unique identifier for this run
-        # run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())
-
         # Save the final model and tokenizer
         checkpoint_dir = os.getcwd() + os.path.join(args.output_dir, f"checkpoint-{args.num_episodes}_episodes-{args.max_steps}_steps/")
         breakpoint()
@@ -95,7 +91,6 @@ def train_critic(actor:LactChain,
         breakpoint()
         torch.save(critic.state_dict(), checkpoint_dir + 'critic_checkpoint.pt')
         critic.tokenizer.save_pretrained(checkpoint_dir)
-        # torch.save(critic.model.state_dict(), os.path.join(checkpoint_dir, "pytorch_model.bin"))
 
         print(f"Checkpoint saved to {checkpoint_dir}")
         print(f"Model and tokenizer saved to {args.output_dir}")

@@ -11,7 +11,7 @@ import os, uuid
 from lactchain.environments.grid_world import GridEnvironment
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
-from lactchain.utils import ...
+# from lactchain.utils import ...
 
 PathLike=Union[str, Path]
 
@@ -86,9 +86,7 @@ def train_critic(actor:LactChain,
 
         # Save the final model and tokenizer
         checkpoint_dir = os.getcwd() + os.path.join(args.output_dir, f"checkpoint-{args.num_episodes}_episodes-{args.max_steps}_steps/")
-        breakpoint()
         os.makedirs(checkpoint_dir, exist_ok=True)
-        breakpoint()
         torch.save(critic.state_dict(), checkpoint_dir + 'critic_checkpoint.pt')
         critic.tokenizer.save_pretrained(checkpoint_dir)
 
@@ -117,13 +115,13 @@ def main():
     critic_config=ValueFunctionConfig()
 
     args=argparse()
-    os.listdir()
-    '''
-    if args.resume_from_checkpoint: 
-        lactchain_path = 
-        list_dir = os.listdir(os.getcwd() + '')
-        checkpoint_path = os.path.join()
-    '''
+    # os.listdir()
+    # '''
+    # if args.resume_from_checkpoint: 
+    #     lactchain_path = 
+    #     list_dir = os.listdir(os.getcwd() + '')
+    #     checkpoint_path = os.path.join()
+    # '''
 
     # Check if resume_from_checkpoint is specified
     if args.resume_from_checkpoint:

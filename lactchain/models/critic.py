@@ -55,12 +55,20 @@ class ValueFunction(nn.Module):
             
         self.q_value_head = nn.Linear(self.model.config.hidden_size, 1)
 
+        self._total_params=sum(
+            [p.numel() for p in self.model.parameters() if p.requires_grad] + 
+            [p.numel() for p in self.q_value_head.parameters() if p.requires_grad]
+            )
         # tokenizer setup
         self.tokenizer=AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.model_max_length = min(self.model.config.max_position_embeddings, 
                                               config.max_seq_length)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+    @property
+    def total_params(self): 
+        return self._total_params
             
     @classmethod
     def load_from_checkpoint(cls, checkpoint:str, config:ValueFunctionConfig):

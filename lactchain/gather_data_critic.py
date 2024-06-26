@@ -33,7 +33,6 @@ def sample_data(env:gym.Env, num_samples:int) -> Tuple[Tensor, list[str]]:
     sampled_states=torch.cat([sampled_coords, sampled_orientations.unsqueeze(1)], dim=1)
     return sampled_states, infos
 
-
 def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
     '''Returns a batch of sampled_states
     Outputs:
@@ -116,7 +115,6 @@ def batch_sample_actions(states:list[Dict[str, int]], infos:list[int],
             pass
 
     return {'prompt':prompts, 'chosen':chosens,'rejected':rejects}
-
 
 
 def sample_one_shot_trajectories(actor:LactChain=None,

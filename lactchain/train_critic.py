@@ -11,6 +11,7 @@ import os, uuid
 from lactchain.environments.grid_world import GridEnvironment
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
+from lactchain.utils import ...
 
 PathLike=Union[str, Path]
 
@@ -32,8 +33,7 @@ def train_critic(actor:LactChain,
                  env:GridEnvironment,
                  args:ArgumentParser,
                  ):
-    TOTAL_PARAMS=sum(p.numel() for p in critic.parameters() if p.requires_grad)
-    print(f'STARTING TRAINING..., with model size {TOTAL_PARAMS}')
+    print(f'STARTING TRAINING..., with model size {critic.total_params}')
 
     for episode in range(args.num_episodes):
 
@@ -117,6 +117,13 @@ def main():
     critic_config=ValueFunctionConfig()
 
     args=argparse()
+    os.listdir()
+    '''
+    if args.resume_from_checkpoint: 
+        lactchain_path = 
+        list_dir = os.listdir(os.getcwd() + '')
+        checkpoint_path = os.path.join()
+    '''
 
     # Check if resume_from_checkpoint is specified
     if args.resume_from_checkpoint:

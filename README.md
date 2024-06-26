@@ -13,7 +13,7 @@ huggingface-cli download --repo-type models --cache-dir ./ Salesforce/SFR-Embedd
 ## Note: Make sure you are on cuda devices 12
 
 ```
-conda create lactchain python=3.11 -y
+conda create -n lactchain python=3.11 -y
 conda activate lactchain 
 pip install -e .
 ```

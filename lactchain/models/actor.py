@@ -158,6 +158,7 @@ class LactChain(nn.Module):
 
         outputs=self.generator.generate(strategies)
         parsed_outputs=self.parse_outputs(outputs)
+        print(outputs)
         action=parsed_outputs[0]['moves'] # 0 since we are assuming list of actions is just [action]
         context=parsed_outputs[0]['explain']
         return action, context

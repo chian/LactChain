@@ -1,5 +1,6 @@
 import torch
 import torch.distributed as dist
+# from torch.multiprocessing import Manager
 import os, sys
 import torch.multiprocessing as mp
 from typing import Optional, Union, Dict, Any, List, Callable
@@ -7,6 +8,7 @@ import sys, os
 from lactchain.environments.grid_world import GridEnvironment
 import gymnasium as gym
 from transformers import AutoModel
+from lactchain.models.actor import ActorConfig, LactChain, LoraConfigSettings
 '''
 Helpful Cuda-Torch Commands: 
 - torch.cuda.is_available() -> bool: 
@@ -17,7 +19,8 @@ Helpful Cuda-Torch Commands:
     returns the total amount of gpus that are available to use on a node
 '''
 
-PATH="/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11"
+# PATH="/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11"
+ACTOR_PATH="/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de"
 
 def get_open_port() -> int:
         import socket
@@ -44,9 +47,17 @@ def setup(world_size:int, rank:int, backend:str):
 def cleanup(): 
     dist.destroy_process_group() # destroy process group per comm
     
+def create_env(rank:int): 
+    from lactchain.environments.grid_world import GridEnvironment
+    import gymnasium as gym
+    print(f'starting environment at rank {rank}')
+    env=GridEnvironment()
+    return env
     
-def gather_states(rank: int, world_size: int, sub_size: int):
-    '''1. make a list of tensor of ones on rank [0] --> scatter to ranks [4, 6, 8]'''
+def gather_reset_states(rank: int, world_size: int, shared_data:list[Any], lock:Any):
+    '''Collect env state, info from env.reset() in ranks [0, 1, 2, 3]
+    All_gather --> [2, 3] 
+    '''
     sub_ranks_1 = [0, 1, 2, 3]
     sub_group_1 = dist.new_group(sub_ranks_1)
 
@@ -58,12 +69,56 @@ def gather_states(rank: int, world_size: int, sub_size: int):
         state, info = env.reset()
         env_state={'state':str(state), 'info':info}
         output = [None]*len(sub_ranks_1)
-        dist.all_gather_object(output, env_state, group=sub_group_2)
+        dist.all_gather_object(output, env_state, group=sub_group_1)
         
+        shared_list=[element for element in output]
+        # print(f'Rank: {rank}, Shared Data: {shared_list}')
+        
+        with lock:  # Synchronize access to the shared data
+            for i in range(world_size):
+                shared_data[i] = shared_list[i]
+        print(f'Rank: {rank}, Shared Data: {shared_data}') if rank == 0 else None
         dist.barrier()
-        print(f'Rank: {rank}, Received State: {output}') if rank in sub_ranks_2 else None
+        
+        
+def actor_inference(rank: int, world_size: int, shared_data:list[Any], lock:Any): 
+    sub_ranks_1 = [0, 1, 2, 3]
+    sub_group_1 = dist.new_group(sub_ranks_1)
+
+    sub_ranks_2 = [2, 3]
+    sub_group_2 = dist.new_group(sub_ranks_2)
+    if rank==2: 
+        with lock:
+            print(f'Rank: {rank}, Received State: {shared_data}')
+            states=[data['state'] for data in shared_data]
+            infos=[data['info'] for data in shared_data]
+        
+        config=ActorConfig()
+        lora_config=LoraConfigSettings()
+        device=torch.cuda.current_device()
+        actor=LactChain(ACTOR_PATH, config, lora_config).to(device)
+        print(f'Model device {device}')
+        actions, contexts=actor.sample_actions(states, infos)
+        print(f'Rank: {rank}, action: {actions}')
+        
+        output = [{'action':action, 'context':context} for action, context in zip(actions, contexts)]
+        print(f'Length of actor output:{len(output)}')
+        
+        dist.broadcast_object_list(object_list=output, 
+                                    src=rank, 
+                                    group=sub_group_1
+                                    )
+        
+        # shared_list=[element for element in output]
+        with lock:  # Synchronize access to the shared data
+            for i in range(len(sub_group_1)):
+                shared_data[i] = output[i]
+        print(f'Shared Data: {shared_data}')
+        
+    dist.barrier()
     
-def init_process(rank:int, world_size:int, port:int, fn:Callable, backend:str='nccl') -> None:
+
+def init_process(rank:int, world_size:int, port:int, fn:Callable, shared_data:list[Any], lock:Any, backend:str='nccl') -> None:
     """ Initialize the distributed environment. """
     os.environ['MASTER_ADDR'] = 'localhost' # '127.0.0.1'
     os.environ['MASTER_PORT'] = str(port)
@@ -73,14 +128,8 @@ def init_process(rank:int, world_size:int, port:int, fn:Callable, backend:str='n
     '''
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
-    fn(rank, world_size, 3) # your function that is called
-    
-def create_env(rank:int): 
-    from lactchain.environments.grid_world import GridEnvironment
-    import gymnasium as gym
-    print(f'starting environment at rank {rank}')
-    env=GridEnvironment()
-    return env
+    fn(rank, world_size, shared_data, lock) # your function that is called
+
 
 def main(): 
 
@@ -90,14 +139,34 @@ def main():
     processes=[]
     backend='nccl'
     mp.set_start_method('spawn')
+    # shared_data = [None]  # Shared list to store data between functions
+    manager = mp.Manager()
+    shared_data = manager.list([0]*num_processes)  # Shared list to store data between functions
+    lock = manager.Lock()
 
-    for rank in range(num_processes): 
-        process=mp.Process(target=init_process, args=(rank, world_size, port, step_1, backend))
-        process.start()
-        processes.append(process)
-
-    for process in processes: 
-        process.join()
+    try: 
+        for rank in range(num_processes): 
+            process=mp.Process(target=init_process, args=(rank, world_size, port, 
+                                                        gather_reset_states, shared_data, lock, backend))
+            process.start()
+            processes.append(process)
+        for process in processes: 
+            process.join()
+    except: 
+        cleanup()
+        
+    try: 
+        for rank in range(num_processes): 
+            process=mp.Process(target=init_process, args=(rank, world_size, port, 
+                                                        actor_inference, shared_data, lock, backend))
+            process.start()
+            processes.append(process)
+        for process in processes: 
+            process.join()
+    except: 
+        cleanup()
+        
+    
         
 if __name__=="__main__": 
     

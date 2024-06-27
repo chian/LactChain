@@ -3,10 +3,17 @@
 This repo serves as a template for coding out a Reinforcement Learning (RL) system. This system is meant to be a multi-purpose system with multiple possible applications.
 
 # Install Instructions: 
+## Download weights: 
+```
+# download actor model
+huggingface-cli download --repo-type models --cache-dir ./ mistralai/Mistral-7B-Instruct-v0.3
+# download critic model
+huggingface-cli download --repo-type models --cache-dir ./ Salesforce/SFR-Embedding-Mistral
+```
 ## Note: Make sure you are on cuda devices 12
 
 ```
-conda create lactchain python=3.11 -y
+conda create -n lactchain python=3.11 -y
 conda activate lactchain 
 pip install -e .
 ```

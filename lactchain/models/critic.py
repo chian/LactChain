@@ -94,13 +94,18 @@ class ValueFunction(nn.Module):
 
 
 if __name__=="__main__": 
+    import torch.multiprocessing as mp
+    
+    PATH="/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11"
 
     config=ValueFunctionConfig()
-    valuefunction=ValueFunction(config)
+    valuefunction=ValueFunction(PATH, config).to('cuda:0')
+    
+    # main()
 
-    states=[{'x':3, 'y':4, 'orientation':'right'}, {'x':4, 'y':5, 'orientation':'left'}]
-    info=['grid world is size 5', 'grid world is size 6']
+    # states=[{'x':3, 'y':4, 'orientation':'right'}, {'x':4, 'y':5, 'orientation':'left'}]
+    # info=['grid world is size 5', 'grid world is size 6']
 
-    values=valuefunction(states, info)
+    # values=valuefunction(states, info)
 
     breakpoint()

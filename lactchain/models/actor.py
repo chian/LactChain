@@ -2,6 +2,7 @@ from textwrap import dedent
 from typing import Any, List, Dict, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
+import torch
 import torch.nn as nn
 import pprint as pp
 import json
@@ -143,6 +144,7 @@ class LactChain(nn.Module):
                 pass
         return parsed_outputs
 
+    @torch.no_grad()
     def sample_action(self,
                       states:Dict[str, Any],
                       infos:str
@@ -160,6 +162,7 @@ class LactChain(nn.Module):
         context=parsed_outputs[0]['explain']
         return action, context
 
+    @torch.no_grad()
     def sample_actions(self,
                       states:Dict[str, Any],
                       infos:str

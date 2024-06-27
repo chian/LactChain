@@ -84,14 +84,14 @@ def train_critic(actor:LactChain,
         print(f'Episode {episode+1} Loss: {critic_loss}')
         print(f'Episode {episode+1} Total Reward: {cumulative_returns.mean()}')
 
-        # Save the final model and tokenizer
-        checkpoint_dir = os.getcwd() + os.path.join(args.output_dir, f"checkpoint-{args.num_episodes}_episodes-{args.max_steps}_steps/")
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        torch.save(critic.state_dict(), checkpoint_dir + 'critic_checkpoint.pt')
-        critic.tokenizer.save_pretrained(checkpoint_dir)
+    # Save the final model and tokenizer
+    checkpoint_dir = os.getcwd() + os.path.join(args.output_dir, f"checkpoint-{args.num_episodes}_episodes-{args.max_steps}_steps/")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    torch.save(critic.state_dict(), checkpoint_dir + 'critic_checkpoint.pt')
+    critic.tokenizer.save_pretrained(checkpoint_dir)
 
-        print(f"Checkpoint saved to {checkpoint_dir}")
-        print(f"Model and tokenizer saved to {args.output_dir}")
+    print(f"Checkpoint saved to {checkpoint_dir}")
+    print(f"Model and tokenizer saved to {args.output_dir}")
         
         
 def argparse() -> Any:
@@ -116,12 +116,13 @@ def main():
 
     args=argparse()
     # os.listdir()
-    # '''
-    # if args.resume_from_checkpoint: 
-    #     lactchain_path = 
-    #     list_dir = os.listdir(os.getcwd() + '')
-    #     checkpoint_path = os.path.join()
-    # '''
+    '''
+    from lactchain.utils import load_lactchain_path
+    if args.resume_from_checkpoint: 
+        lactchain_path = load_latchain_path()
+        list_dir = os.listdir(os.getcwd() + '')
+        checkpoint_path = os.path.join()
+    '''
 
     # Check if resume_from_checkpoint is specified
     if args.resume_from_checkpoint:

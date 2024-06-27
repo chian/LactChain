@@ -193,7 +193,7 @@ def main():
 
     if args.data_save_path:
         
-        if args.save
+        # if args.save
         
         
         dataset=HFDataset.from_dict(data)

@@ -3,6 +3,7 @@ from typing import Any, List, Dict, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 import torch
+import numpy as np
 import torch.nn as nn
 import pprint as pp
 import json
@@ -133,6 +134,17 @@ class LactChain(nn.Module):
         except Exception as e:
             return dedent(f'''Your output string is not correctly formatted for {pp.pformat(outputs)}.
                             Here is the error{e}''')
+            
+    def map_actions(self, batch_actions:list[str]): 
+        map={
+            'move forward':0, 
+            'turn left':1
+        }
+        batch_mapped_actions=[]
+        for actions in batch_actions:
+            mapped_actions=np.array([map.get(action) for action in actions])
+            batch_mapped_actions.append(mapped_actions)
+        return batch_mapped_actions
 
     def batch_parse_outputs(self, outputs:list[str]) -> list[str]:
         parsed_outputs=[]
@@ -158,6 +170,9 @@ class LactChain(nn.Module):
 
         outputs=self.generator.generate(strategies)
         parsed_outputs=self.parse_outputs(outputs)
+        
+        actions=self.map_actions(parsed_outputs)
+        breakpoint()
         print(outputs)
         action=parsed_outputs[0]['moves'] # 0 since we are assuming list of actions is just [action]
         context=parsed_outputs[0]['explain']
@@ -178,7 +193,8 @@ class LactChain(nn.Module):
         parsed_outputs=self.batch_parse_outputs(outputs)
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
-        return actions, contexts
+        mapped_actions=self.map_actions(actions)
+        return mapped_actions, actions, contexts
     
 
 if __name__=="__main__":
@@ -191,8 +207,6 @@ if __name__=="__main__":
     actor=LactChain('/nfs/lambda_stor_01/homes/bhsu/huggingface_models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de', 
                     policy_config, 
                     lora_config)
-    
-    
     
 
     breakpoint()

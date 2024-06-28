@@ -4,7 +4,7 @@ import gymnasium as gym
 import numpy as np
 from lactchain.classes.base_environment import AbstractEnvironment
 from lactchain.classes.base_reward import AbstractRewardFunction
-from typing import Tuple, Any, Dict, List
+from typing import Tuple, Any, Dict, List, OrderedDict
 from torch.distributions import Categorical
 
 class GridEnvironment(gym.Env): 
@@ -165,7 +165,7 @@ class VectorizedGridWorld(gym.Env):
         
     def reset(self) -> Tuple[Dict[str, np.ndarray], Dict[str, str]]: 
         self.state = {'x': 0, 'y': 0, 'orientation': 0}
-        return self.state, {'info': 'information'}
+        return self.state, {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
         
     def step(self, actions: Any) -> Tuple[Dict[str, int], float, bool, bool, Dict[str, str]]:
         total_reward = 0
@@ -194,7 +194,7 @@ class VectorizedGridWorld(gym.Env):
         # done = (self.state['x'], self.state['y']) == self.goal_position
         done = (self.state['x'], self.state['y']) == (0, 0)
         truncated = False  # set your own condition for truncated if needed
-        return self.state, total_reward, done, truncated, {'info': 'information'}
+        return self.state, total_reward, done, truncated, {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
     
     def _compute_reward(self) -> int:
         if (self.state['x'], self.state['y']) == self.goal_position:
@@ -205,8 +205,31 @@ class VectorizedGridWorld(gym.Env):
 def make_env():
     return VectorizedGridWorld()
 
+def process_environment_outputs(vector_observations:OrderedDict, 
+                                vector_info:Dict[str, np.ndarray]) -> list[Dict[str, Any]]: 
+    obs_list=[]
+    info_list=[]
+    for idx, (_, info) in enumerate(zip(vector_observations['orientation'], vector_info['info'])): 
+        obs_element={key: value[idx] for key, value in vector_observations.items()}
+        info_element={'info':info}
+        obs_list.append(obs_element)
+        info_list.append(info_element)
+    return obs_list, info_list
+
 
 if __name__=="__main__": 
+    
+    from lactchain.models.actor import ActorConfig, LactChain, LoraConfigSettings
+    from lactchain.models.critic import ValueFunction, ValueFunctionConfig
+    
+    ACTOR_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'
+    actor_config=ActorConfig()
+    lora_config=LoraConfigSettings()
+    actor = LactChain(ACTOR_PATH, actor_config, lora_config)
+    
+    # CRITIC_PATH="/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11"
+    # critic_config=ValueFunctionConfig()
+    # critic = ValueFunction(CRITIC_PATH, critic_config)
     
     out=VectorizedGridWorld()
     distro=out.orientation_set_distro
@@ -214,20 +237,13 @@ if __name__=="__main__":
     num_envs = 4  # Number of environments to run in parallel
     async_vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(num_envs)])
     
-    # for env in async_vector_env.envs:
-    #     print(env.orientation_set_distro)
+    vect_obs, vect_info = async_vector_env.reset()
+    obs, info=process_environment_outputs(vect_obs, vect_info)
+    mapped_actions, actions, contexts=actor.sample_actions(obs, info)
+    next_obs, reward, done, truncated, info = async_vector_env.step(mapped_actions)
     
-    # obs, info = async_vector_env.reset()
-
+    breakpoint()
+    
     # actions=[np.array([0, 1]), np.array([1, 0, 1, 0, 1, 0]), np.array([0, 1]), np.array([1, 0])]
     # next_obs, reward, done, truncated, info = async_vector_env.step(actions)
     
-    breakpoint()
-    
-    # obs = env.reset()
-    # action_seq=['turn left', 'turn left', 'move forward', 'move forward', 'move forward', 'move forward']
-    # obs, tot_reward, rewards, done = env.step(action_seq)
-
-    # values=[1, 1, 1, 1, 1]
-    
-    breakpoint()

@@ -7,6 +7,7 @@ import numpy as np
 import torch.nn as nn
 import pprint as pp
 import json
+import lightning as pl
 from lactchain.configs.base_config import BaseConfig
 from lactchain.models.backends.langchain_backend import LangChainGenerator, GeneratorConfig
 from lactchain.models.backends.vllm_backend import VLLMGeneratorConfig, VLLMGenerator
@@ -149,11 +150,11 @@ class LactChain(nn.Module):
     def batch_parse_outputs(self, outputs:list[str]) -> list[str]:
         parsed_outputs=[]
         for i, output in enumerate(outputs):
-            try:
-                parsed_outputs.append(json.loads(output))
-            except Exception as e:
-                print(f'PARSING ERROR FOR ELEMENT {i} IN BATCH...SKIPPING')
-                pass
+            # try:
+            parsed_outputs.append(json.loads(output))
+            # except Exception as e:
+            #     print(f'PARSING ERROR FOR ELEMENT {i} IN BATCH...SKIPPING')
+            #     pass
         return parsed_outputs
 
     @torch.no_grad()
@@ -196,6 +197,8 @@ class LactChain(nn.Module):
         mapped_actions=self.map_actions(actions)
         return mapped_actions, actions, contexts
     
+        
+
 
 if __name__=="__main__":
 

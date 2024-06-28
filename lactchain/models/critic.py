@@ -8,7 +8,7 @@ from typing import Any, Union, Dict, Tuple, List, Optional, Literal
 from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
 from transformers import BitsAndBytesConfig
 from torch import Tensor
-
+import lightning as pl
 from lactchain.configs.base_config import BaseConfig
 
 class LoraConfigSettings(BaseConfig): 

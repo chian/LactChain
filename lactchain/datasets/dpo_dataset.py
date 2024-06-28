@@ -5,6 +5,8 @@ from typing import Tuple, List, Any, Dict, Union, Callable, Optional
 from torch.utils.data import DataLoader, Dataset
 from datasets import Dataset as HFDataset, concatenate_datasets
 from torch import Tensor
+import lightning as pl 
+
 
 class DPODataset(HFDataset): 
     '''

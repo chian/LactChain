@@ -3,6 +3,7 @@ import torch.distributed as dist
 # from torch.multiprocessing import Manager
 import os, sys
 import torch.multiprocessing as mp
+from torch.multiprocessing import Queue
 from typing import Optional, Union, Dict, Any, List, Callable
 import sys, os
 from lactchain.environments.grid_world import GridEnvironment
@@ -53,32 +54,6 @@ def create_env(rank:int):
     print(f'starting environment at rank {rank}')
     env=GridEnvironment()
     return env
-    
-def gather_reset_states(rank: int, world_size: int, shared_data:list[Any], lock:Any):
-    '''Collect env state, info from env.reset() in ranks [0, 1, 2, 3]
-    All_gather --> [2, 3] 
-    '''
-    sub_ranks_1 = [0, 1, 2, 3]
-    sub_group_1 = dist.new_group(sub_ranks_1)
-
-    sub_ranks_2 = [2, 3]
-    sub_group_2 = dist.new_group(sub_ranks_2)
-
-    if rank in sub_ranks_1:
-        env = create_env(rank)
-        state, info = env.reset()
-        env_state={'state':str(state), 'info':info}
-        output = [None]*len(sub_ranks_1)
-        dist.all_gather_object(output, env_state, group=sub_group_1)
-        
-        shared_list=[element for element in output]
-        # print(f'Rank: {rank}, Shared Data: {shared_list}')
-        
-        with lock:  # Synchronize access to the shared data
-            for i in range(world_size):
-                shared_data[i] = shared_list[i]
-        print(f'Rank: {rank}, Shared Data: {shared_data}') if rank == 0 else None
-        dist.barrier()
         
         
 def actor_inference(rank: int, world_size: int, shared_data:list[Any], lock:Any): 
@@ -118,17 +93,20 @@ def actor_inference(rank: int, world_size: int, shared_data:list[Any], lock:Any)
     dist.barrier()
     
 
-def init_process(rank:int, world_size:int, port:int, fn:Callable, shared_data:list[Any], lock:Any, backend:str='nccl') -> None:
-    """ Initialize the distributed environment. """
-    os.environ['MASTER_ADDR'] = 'localhost' # '127.0.0.1'
-    os.environ['MASTER_PORT'] = str(port)
-    torch.cuda.set_device(rank % torch.cuda.device_count())
-    '''Note: the dist.init_process_group creates distributed process group. each process calls this function so that 
-    each process understands the group it belongs to, the number of ranks/processes, world size
-    '''
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
+# def init_process(rank:int, world_size:int, port:int, backend:str, fn:Callable, 
+#                  queue, buffer, 
+#                  actor, critic, 
+#                  ) -> None:
+#     """ Initialize the distributed environment. """
+#     os.environ['MASTER_ADDR'] = 'localhost' # '127.0.0.1'
+#     os.environ['MASTER_PORT'] = str(port)
+#     torch.cuda.set_device(rank % torch.cuda.device_count())
+#     '''Note: the dist.init_process_group creates distributed process group. each process calls this function so that 
+#     each process understands the group it belongs to, the number of ranks/processes, world size
+#     '''
+#     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
-    fn(rank, world_size, shared_data, lock) # your function that is called
+#     fn(rank, world_size, queue, buffer, actor, critic) # your function that is called
 
 
 def main(): 
@@ -140,31 +118,45 @@ def main():
     backend='nccl'
     mp.set_start_method('spawn')
     # shared_data = [None]  # Shared list to store data between functions
-    manager = mp.Manager()
-    shared_data = manager.list([0]*num_processes)  # Shared list to store data between functions
-    lock = manager.Lock()
+    # manager = mp.Manager()
+    # shared_data = manager.list([0]*num_processes)  # Shared list to store data between functions
+    # lock = manager.Lock()
+    q = Queue()
+    
+    try: 
+        for rank in range(num_processes): 
+            process=mp.Process(target=init_process, args=(rank, world_size, port, 
+                                                          gather_reset_states, 
+                                                          q)
+                               )
+            process.start()
+            processes.append(process)
+        for process in processes: 
+            process.join()
+    except: 
+        cleanup()
 
-    try: 
-        for rank in range(num_processes): 
-            process=mp.Process(target=init_process, args=(rank, world_size, port, 
-                                                        gather_reset_states, shared_data, lock, backend))
-            process.start()
-            processes.append(process)
-        for process in processes: 
-            process.join()
-    except: 
-        cleanup()
+    # try: 
+    #     for rank in range(num_processes): 
+    #         process=mp.Process(target=init_process, args=(rank, world_size, port, 
+    #                                                     gather_reset_states, shared_data, lock, backend))
+    #         process.start()
+    #         processes.append(process)
+    #     for process in processes: 
+    #         process.join()
+    # except: 
+    #     cleanup()
         
-    try: 
-        for rank in range(num_processes): 
-            process=mp.Process(target=init_process, args=(rank, world_size, port, 
-                                                        actor_inference, shared_data, lock, backend))
-            process.start()
-            processes.append(process)
-        for process in processes: 
-            process.join()
-    except: 
-        cleanup()
+    # try: 
+    #     for rank in range(num_processes): 
+    #         process=mp.Process(target=init_process, args=(rank, world_size, port, 
+    #                                                     actor_inference, shared_data, lock, backend))
+    #         process.start()
+    #         processes.append(process)
+    #     for process in processes: 
+    #         process.join()
+    # except: 
+    #     cleanup()
         
     
         

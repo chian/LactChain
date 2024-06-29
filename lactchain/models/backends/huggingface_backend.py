@@ -170,7 +170,7 @@ class HuggingFaceGenerator:
 
         _tokenizer_call_kwargs={'return_tensors':'pt', 'padding':'longest'}
         _model_call_kwargs={'num_return_sequences':1, 'max_new_tokens':500, 
-                            'do_sample':True, 'temperature':1}
+                            'do_sample':True, 'temperature':0.1}
 
         batch_encoding=self.tokenizer(prompts, **_tokenizer_call_kwargs)
         batch_encoding = batch_encoding.to(self.model.device) # returns 

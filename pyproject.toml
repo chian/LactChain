@@ -23,6 +23,7 @@ dependencies = [
     "torchvision==0.18.0",
     "transformers==4.41.1",
     "pytorch-lightning==2.2.5",
+    "lightning",
     "python-dotenv==1.0.1",
     "datasets==2.19.1", 
     "bitsandbytes==0.43.1",

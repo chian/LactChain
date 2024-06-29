@@ -28,18 +28,18 @@ def train(
     agent: LightningA2C,
     optimizer: torch.optim.Optimizer,
     data: Dict[str, Tensor],
-    global_step: int,
     args: ArgumentParser,
 ):
-    indexes = list(range(data["obs"].shape[0]))
+    breakpoint()
+    indexes = list(range(data["values"].shape[0]))
     if args.share_data:
         sampler = DistributedSampler(
-            indexes, num_replicas=fabric.world_size, rank=fabric.global_rank, shuffle=True, seed=args.seed
+            indexes, num_replicas=fabric.world_size, rank=fabric.global_rank, shuffle=True
         )
     else:
         sampler = RandomSampler(indexes)
     sampler = BatchSampler(sampler, batch_size=args.per_rank_batch_size, drop_last=False)
-
+    breakpoint()
     for epoch in range(args.update_epochs):
         if args.share_data:
             sampler.sampler.set_epoch(epoch)
@@ -49,7 +49,7 @@ def train(
             fabric.backward(loss)
             fabric.clip_gradients(agent, optimizer, max_norm=args.max_grad_norm)
             optimizer.step()
-        agent.on_train_epoch_end(global_step)
+        # agent.on_train_epoch_end()
         
 def argparse(): 
     args=ArgumentParser()
@@ -58,7 +58,8 @@ def argparse():
     args.add_argument('--critic_path', type=str, default=CRITIC_PATH)
     args.add_argument('--gamma', type=float, default=0.99)
     args.add_argument('--learning_rate', type=float, default=1e-4)
-    args.add_argument('--num_steps', type=int, default=10)
+    args.add_argument('--num_steps', type=int, default=5)
+    args.add_argument('--per_rank_batch_size', type=int, default=4)
     return args.parse_args()
 
 def main():
@@ -93,7 +94,6 @@ def main():
             mapped_actions, actions, contexts=agent.sample_actions(obs, info)
             next_obs, reward, done, truncated, info = vector_env.step(mapped_actions)
             next_obs, info=process_environment_outputs(next_obs, info)
-            breakpoint()
             value=agent.calculate_value(next_obs, info)
             print(value)
             
@@ -102,25 +102,19 @@ def main():
             actions.append(mapped_actions)
             values.append(value)
             obs = next_obs
-        except: 
-            print(f'invalid parsing, dropping step...')
+        except Exception as e: 
+            print(f'Lightning Agent Error {e} dropping step {step}...')
             pass
-        
+    
     local_data={
-            'observations':None, 
-            'rewards':None, 
-            'actions':None, 
-            'values':None
-        }
+            'rewards':torch.cat([torch.from_numpy(reward) for reward in rewards]).to(fabric.device), 
+            'values':torch.cat(values).to(fabric.device)
+            }
     
     gathered_data = fabric.all_gather(local_data)
+    print(f'mapped actions: {gathered_data}')
     
-    print(f'mapped actions: {mapped_actions}')
-    
-    # breakpoint()
-    
-    
-    
+    train(fabric, agent, optimizer, gathered_data, args)    
     
 
 if __name__=="__main__": 

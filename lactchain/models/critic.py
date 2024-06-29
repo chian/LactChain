@@ -77,15 +77,16 @@ class ValueFunction(nn.Module):
 
     def forward(self, 
                 states:Dict[str, Any] | list[Dict[str, Any]], 
-                info:Optional[str | list[str]]=None
+                info:Dict[str, Any] | list[Dict[str, Any]]
                 ) -> Tensor: 
         states=[states] if isinstance(states, dict) else states
         states=[str(state) for state in states]
-        if info is not None: 
-            info=[info] if isinstance(info, str) else info
-            states=[states+'\n'+info for states, info in zip(states, info)]
-        
-        inputs = self.tokenizer(states, **self.tokenizer_call_kwargs)
+        info=[str(info['info']) for info in info]
+        # if info is not None: 
+        #     info=[str(info['info'])]
+        #     info=[str(info)] if isinstance(info, str) else str(info)
+        states=[states+'\n'+info for states, info in zip(states, info)]
+        inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
         outputs = self.model(**inputs)
         last_hidden_states = outputs.last_hidden_state
         q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation

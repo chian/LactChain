@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 import torch
 import numpy as np
-import torch.nn as nn
+import torch.nn as nn, torch.nn.functional as F
 import pprint as pp
 import json
 import lightning as pl
@@ -38,12 +38,10 @@ class LightningA2C(pl.LightningModule):
         self.critic=ValueFunction(critic_model, critic_config)
         
         self.gamma=gamma
-        
-        # freeze weights of actor model 
+
         for param in self.actor.parameters():
             param.requires_grad = False
         
-    @torch.no_grad()
     def sample_actions(self,
                        states:Dict[str, Any],
                        infos:str
@@ -51,7 +49,6 @@ class LightningA2C(pl.LightningModule):
         '''Actor samples actions'''
         mapped_actions, actions, contexts = self.actor.sample_actions(states, infos)
         return mapped_actions, actions, contexts
-    
     
     def calculate_value(self,
                         states:Dict[str, Any] | list[Dict[str, Any]], 
@@ -61,30 +58,62 @@ class LightningA2C(pl.LightningModule):
         pred_q_values = self.critic(states, info)
         return pred_q_values
     
-    def _calc_returns(self, rewards:List[int]) -> List[Tensor]:
+    def _calc_returns_list(self, rewards:List[int]) -> List[np.ndarray]:
         '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
         Input: Sequence[int] -> Output: Sequence[torch(int)]
         '''
         returns=[]
         R = 0
         for r in rewards[::-1]:
-            R = r + self.gamma*R
-            returns.insert(0, torch.tensor(R))
+            R = (r + self.gamma*R).clone()
+            returns.insert(0, R)
         return returns
     
-    @torch.no_grad()
-    def calculate_returns_advantages(self, rewards:List[int], values:Any):
-        cumulative_returns=self._calc_returns(rewards, self.gamma)
-        cumulative_returns = torch.tensor(cumulative_returns)
-        cumulative_returns = (cumulative_returns - cumulative_returns.mean()) /\
-                                (cumulative_returns.std() + 1e-12)
-
-        advantages=[]
-        for R, value in zip(cumulative_returns, values):
-            advantages.append((R - value)) # advantage = R - value
-
-        return cumulative_returns, advantages
+    def _calc_returns(self, rewards:Tensor) -> Tensor:
+        '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
+        Input: Sequence[int] -> Output: Sequence[torch(int)]
+        '''
+        # returns = torch.zeros_like(rewards, dtype=torch.float)
+        returns = torch.zeros(rewards.shape).to(rewards.device)
+        R = torch.tensor(0.0)
+        for idx, r in enumerate(torch.flip(rewards, dims=[0])):
+            R = r + self.gamma*R
+            returns[idx]=R
+        return returns
     
+    def calculate_returns(self, rewards:Tensor) -> Tensor:
+        
+        cumulative_returns=self._calc_returns(rewards)
+        # cumulative_returns=torch.stack(cumulative_returns)
+        cumulative_returns = (cumulative_returns - cumulative_returns.mean()) /\
+                                    (cumulative_returns.std() + 1e-12)
+
+        return cumulative_returns
+    
+    def forward(self, states, info) -> Tensor: 
+        return self.calculate_value(states, info)
+    
+    def training_step(self, batch: Dict[str, Tensor]):
+
+        rewards=batch['rewards']
+        observations=batch['observations']
+        infos=batch['infos']
+        
+        values=self(observations, infos)
+        cumulative_returns = self.calculate_returns(rewards).to(values.device)
+        breakpoint()
+        critic_loss = F.smooth_l1_loss(cumulative_returns, values)
+        breakpoint()
+        print(f"Critic loss: {critic_loss.item()}")  # Debug print
+        
+        return critic_loss
     
     def configure_optimizers(self, lr: float):
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
+    
+    
+    
+if __name__=="__main__": 
+    
+    
+    breakpoint()

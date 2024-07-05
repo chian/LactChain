@@ -170,7 +170,7 @@ class VectorizedGridWorld(gym.Env):
     def step(self, actions: Any) -> Tuple[Dict[str, int], float, bool, bool, Dict[str, str]]:
         total_reward = 0
         for action in actions:
-            assert action in [0, 1], 'Invalid Action: Must Choose from [0, 1]'
+            assert action in [0, 1, 1000], 'Invalid Action: Must Choose from [0, 1, 1000]'
             x, y, orientation = self.state['x'], self.state['y'], self.state['orientation']
             if action == 0:  # move forward
                 if orientation == 0:  # facing up
@@ -183,6 +183,8 @@ class VectorizedGridWorld(gym.Env):
                     x -= 1
             elif action == 1:  # turn left
                 orientation = (orientation - 1) % 4  # a % b = a - floor(a / b) * b
+            elif action==1000: # special action just does nothing FOR ERROR HANDLING
+                continue
 
             # Enforce boundary conditions
             x = max(0, min(x, self.grid_size - 1))

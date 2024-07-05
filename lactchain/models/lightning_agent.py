@@ -41,14 +41,34 @@ class LightningA2C(pl.LightningModule):
 
         for param in self.actor.parameters():
             param.requires_grad = False
+            
+        self._total_params=sum(
+            [p.numel() for p in self.actor.parameters()] + 
+            [p.numel() for p in self.critic.parameters()] + 
+            [p.numel() for p in self.critic.q_value_head.parameters()]
+            )
+            
+        self._total_trainable_params=sum(
+            [p.numel() for p in self.actor.parameters() if p.requires_grad] + 
+            [p.numel() for p in self.critic.parameters() if p.requires_grad] + 
+            [p.numel() for p in self.critic.q_value_head.parameters() if p.requires_grad]
+            )
         
+        self._model_trainable_params=dedent(f'''Total number of parameters: {self._total_params:,}\nTotal number of trainable parameters: {self._total_trainable_params:,}\nPercentage of parameters trained: {(self._total_trainable_params/self._total_params) * 100}%''')
+        
+    @property
+    def model_trainable_params(self): 
+        return self._model_trainable_params
+        
+    @torch.inference_mode()
     def sample_actions(self,
                        states:Dict[str, Any],
                        infos:str
-                       ) -> Tuple[list[str], str]:
+                       ) -> Tuple[list[np.ndarray], list[str], list[str], list[int]]:
         '''Actor samples actions'''
-        mapped_actions, actions, contexts = self.actor.sample_actions(states, infos)
-        return mapped_actions, actions, contexts
+        batch_mapped_actions, actions, contexts, drop_indices = self.actor.sample_actions(states, infos)
+    
+        return batch_mapped_actions, actions, contexts, drop_indices
     
     def calculate_value(self,
                         states:Dict[str, Any] | list[Dict[str, Any]], 
@@ -84,7 +104,6 @@ class LightningA2C(pl.LightningModule):
     def calculate_returns(self, rewards:Tensor) -> Tensor:
         
         cumulative_returns=self._calc_returns(rewards)
-        # cumulative_returns=torch.stack(cumulative_returns)
         cumulative_returns = (cumulative_returns - cumulative_returns.mean()) /\
                                     (cumulative_returns.std() + 1e-12)
 
@@ -101,19 +120,22 @@ class LightningA2C(pl.LightningModule):
         
         values=self(observations, infos)
         cumulative_returns = self.calculate_returns(rewards).to(values.device)
-        breakpoint()
         critic_loss = F.smooth_l1_loss(cumulative_returns, values)
-        breakpoint()
-        print(f"Critic loss: {critic_loss.item()}")  # Debug print
-        
         return critic_loss
     
     def configure_optimizers(self, lr: float):
+    
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
-    
-    
-    
-if __name__=="__main__": 
-    
-    
-    breakpoint()
+
+        
+    # def configure_optimizers(self, lr: float):
+        
+    #     optimizer=torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
+    #     _scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+    #     lr_scheduler_config={
+    #         'scheduler':_scheduler, 
+    #         'interval':'epoch',
+    #         'frequency':1
+    #     }
+    #     return {'optimizer':optimizer, 
+    #             'scheduler':lr_scheduler_config}

@@ -94,7 +94,7 @@ class LactChain(nn.Module):
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
         self._strategy=Strategy(PROMPT_TEMPLATE, STRATEGY)
-
+        self.error_number=1000
         backends={
             'langchain':LangChainGenerator,
             'vllm':VLLMGenerator,
@@ -136,16 +136,23 @@ class LactChain(nn.Module):
             return dedent(f'''Your output string is not correctly formatted for {pp.pformat(outputs)}.
                             Here is the error{e}''')
             
-    def map_actions(self, batch_actions:list[str]): 
+    def map_actions(self, batch_actions:list[str]) -> Tuple[list[np.ndarray], list[int]]: 
         map={
             'move forward':0, 
             'turn left':1
         }
         batch_mapped_actions=[]
-        for actions in batch_actions:
+        drop_indices=[]
+        for batch_idx, actions in enumerate(batch_actions):
             mapped_actions=np.array([map.get(action) for action in actions])
+            for action in mapped_actions: 
+                if action not in [0, 1]: 
+                    mapped_actions=np.array([self.error_number])
+                    drop_indices.append(batch_idx)
+                    break
             batch_mapped_actions.append(mapped_actions)
-        return batch_mapped_actions
+            
+        return batch_mapped_actions, drop_indices
 
     def batch_parse_outputs(self, outputs:list[str]) -> list[str]:
         parsed_outputs=[]
@@ -172,8 +179,8 @@ class LactChain(nn.Module):
         outputs=self.generator.generate(strategies)
         parsed_outputs=self.parse_outputs(outputs)
         
-        actions=self.map_actions(parsed_outputs)
-        breakpoint()
+        batch_actions, num_actions_dropped=self.map_actions(parsed_outputs)
+
         print(outputs)
         action=parsed_outputs[0]['moves'] # 0 since we are assuming list of actions is just [action]
         context=parsed_outputs[0]['explain']
@@ -184,6 +191,8 @@ class LactChain(nn.Module):
                       states:Dict[str, Any],
                       infos:str
                     ) -> Tuple[list[str], str]:
+        '''Samples batches of actions as List[array(int={0, 1})] where list is the batch, 
+        array is the compound actions'''
         strategies=[]
         states=[states] if isinstance(states, dict) else states
         infos=[infos] if isinstance(infos, str) else infos
@@ -194,8 +203,8 @@ class LactChain(nn.Module):
         parsed_outputs=self.batch_parse_outputs(outputs)
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
-        mapped_actions=self.map_actions(actions)
-        return mapped_actions, actions, contexts
+        mapped_actions, num_actions_dropped=self.map_actions(actions)
+        return mapped_actions, actions, contexts, num_actions_dropped
     
         
 

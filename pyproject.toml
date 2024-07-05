@@ -41,7 +41,6 @@ dependencies = [
     "gymnasium==0.29.1", 
     "pydantic==2.7.2", 
     "sentencepiece==0.2.0", 
-    "uuid"
 ]
 
 

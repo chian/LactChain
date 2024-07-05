@@ -53,8 +53,9 @@ class ValueFunction(nn.Module):
             _model = prepare_model_for_kbit_training(_trunk_model)
             self.model = get_peft_model(_model, self.lora_config)
             
+        # self.model.print_trainable_parameters()    
         self.q_value_head = nn.Linear(self.model.config.hidden_size, 1)
-
+        
         self._total_params=sum(
             [p.numel() for p in self.model.parameters() if p.requires_grad] + 
             [p.numel() for p in self.q_value_head.parameters() if p.requires_grad]
@@ -82,9 +83,7 @@ class ValueFunction(nn.Module):
         states=[states] if isinstance(states, dict) else states
         states=[str(state) for state in states]
         infos=[str(info['info']) for info in infos]
-        # if info is not None: 
-        #     info=[str(info['info'])]
-        #     info=[str(info)] if isinstance(info, str) else str(info)
+        
         states=[states+'\n'+info for states, info in zip(states, infos)]
         inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
         outputs = self.model(**inputs)

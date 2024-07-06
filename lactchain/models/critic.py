@@ -5,7 +5,7 @@ from torch import Tensor, nn, functional as F
 from textwrap import dedent
 from pydantic import Field
 from typing import Any, Union, Dict, Tuple, List, Optional, Literal
-from peft import prepare_model_for_kbit_training, LoraModel, LoraConfig
+from peft import LoraModel, LoraConfig, PeftModel
 from transformers import BitsAndBytesConfig
 from torch import Tensor
 import lightning as pl
@@ -20,18 +20,57 @@ class LoraConfigSettings(BaseConfig):
     task_type:str=Field("SEQ_CLS")
 
 class ValueFunctionConfig(BaseConfig): 
-    bb_config:Any=Field(None)
-    peft_type:Literal['lora', 'qlora']=Field('lora')
-    lora_config_settings:LoraConfigSettings=Field(default_factory=LoraConfigSettings)
-    printer:bool=Field(True)
-    max_seq_length:int=Field(128)
-    torch_dtype:str=Field('torch.float32')
+    use_lora:bool=Field(
+        True, 
+        description='whether or not to use lora adapters or not'
+        )
+    lora_config_settings:LoraConfigSettings=Field(
+        default_factory=LoraConfigSettings, 
+        description='Default Lora config settings'
+        )
+    load_from_checkpoint:str=Field(
+        None, 
+        description='Path to any previously loaded checkpoints'
+    )
+    max_seq_length:int=Field(
+        128, 
+        description='total max length of sequences'
+        )
+    torch_dtype:str=Field(
+        'torch.float32', 
+        description='dtype of model'
+        )
+    gradient_checkpointing_enable:bool=Field(
+        True, 
+        description='Whether to enable gradient checkpointing or not'
+    )
+    quantization: bool = Field(
+        True,
+        description='Whether to use quantization.',
+    )
+    half_precision: bool = Field(
+        False,
+        description='Whether to use half precision.',
+    )
+    compile_model: bool = Field(
+        False,
+        description='Whether to compile the model for faster inference.',
+    )
+    enable_flash_attention:bool=Field(
+        False, 
+        description='Whether to enable flash attention on model or not'
+    )
+    device_map_auto:bool=Field(
+        False, 
+        description='Whether to enable auto device map'
+    )
 
 class ValueFunction(nn.Module): 
     '''Config is type ValueFunctionConfig class and will dump sub-configs or attr into the model'''
     def __init__(self, 
                  model_name:str,
-                 config:ValueFunctionConfig
+                 config:ValueFunctionConfig, 
+                 model_kwargs:Optional[Dict[str, Any]]=None, 
                  ): 
         super().__init__()
 
@@ -40,32 +79,58 @@ class ValueFunction(nn.Module):
             'return_tensors':'pt',
             'padding':'longest'
         }
-        # model setup 
-        self.lora_config=LoraConfig(**config.lora_config_settings.model_dump())
-        if config.peft_type=='lora': 
-            _trunk_model=AutoModel.from_pretrained(model_name, torch_dtype=torch.float32)
-            self.model=LoraModel(_trunk_model, self.lora_config, "default")
-        elif config.peft_type=='qlora':
-            _quant_config=BitsAndBytesConfig(load_in_8bit=True)
-            _trunk_model=AutoModel.from_pretrained(model_name, 
-                                                   torch_dtype=torch.float32, 
-                                                   quantization_config=_quant_config)
-            _model = prepare_model_for_kbit_training(_trunk_model)
-            self.model = get_peft_model(_model, self.lora_config)
-            
-        # self.model.print_trainable_parameters()    
-        self.q_value_head = nn.Linear(self.model.config.hidden_size, 1)
+        model_kwargs={}
         
+        if config.device_map_auto: 
+            model_kwargs['device_map'] = 'auto'
+        
+        if config.quantization: 
+            from transformers import BitsAndBytesConfig
+
+            nf4_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type='nf4',
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+            model_kwargs['quantization_config'] = nf4_config
+            
+        if config.enable_flash_attention: 
+            model_kwargs['attn_implementation'] = "flash_attention_2"
+            
+        model=AutoModel.from_pretrained(model_name, torch_dtype=torch.float32,**model_kwargs)
+        
+        if config.use_lora: 
+            lora_config=LoraConfig(**config.lora_config_settings.model_dump())
+            model=LoraModel(model, lora_config, "default")
+        
+        if config.load_from_checkpoint: 
+            model = PeftModel.from_pretrained(model, config.load_from_checkpoint)
+        
+        if config.gradient_checkpointing_enable: 
+            gradient_checkpointing_kwargs = {}
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        # Compile the model for faster inference
+        if config.compile_model:
+            model = torch.compile(model, fullgraph=True)
+        # Convert the model to half precision
+        if config.half_precision:
+            model.half()
+        # tokenizer setup
+        tokenizer=AutoTokenizer.from_pretrained(model_name)
+        tokenizer.model_max_length = min(model.config.max_position_embeddings, 
+                                              config.max_seq_length)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
+        # fix properties 
+        self.tokenizer=tokenizer
+        self.model=model
+        self.q_value_head=nn.Linear(model.config.hidden_size, 1)
         self._total_params=sum(
             [p.numel() for p in self.model.parameters() if p.requires_grad] + 
             [p.numel() for p in self.q_value_head.parameters() if p.requires_grad]
             )
-        # tokenizer setup
-        self.tokenizer=AutoTokenizer.from_pretrained(model_name)
-        self.tokenizer.model_max_length = min(self.model.config.max_position_embeddings, 
-                                              config.max_seq_length)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
             
     @property
     def total_params(self): 
@@ -75,6 +140,7 @@ class ValueFunction(nn.Module):
     def load_from_checkpoint(cls, checkpoint:str, config:ValueFunctionConfig):
         critic=cls(checkpoint, config)
         return critic
+
 
     def forward(self, 
                 states:Dict[str, Any] | list[Dict[str, Any]], 
@@ -100,6 +166,20 @@ if __name__=="__main__":
 
     config=ValueFunctionConfig()
     valuefunction=ValueFunction(PATH, config).to('cuda:0')
+    
+    def save_model(model, path):
+        torch.save(model.state_dict(), path)
+        
+    def load_model(model, path):
+        state_dict = torch.load(path)
+        model.load_state_dict(state_dict, strict=False)
+    
+    save_path='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/LactChain/lactchain/models/value_function_model.pt'
+    breakpoint()
+    save_model(valuefunction, save_path)
+    
+    breakpoint()
+    load_model(valuefunction, save_path)
     
     # main()
 

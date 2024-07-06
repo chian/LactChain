@@ -69,14 +69,7 @@ class LightningA2C(pl.LightningModule):
         batch_mapped_actions, actions, contexts, drop_indices = self.actor.sample_actions(states, infos)
     
         return batch_mapped_actions, actions, contexts, drop_indices
-    
-    def calculate_value(self,
-                        states:Dict[str, Any] | list[Dict[str, Any]], 
-                        info:Optional[str | list[str]]=None
-                        ) -> Tensor: 
-        '''Critic calculates value by batch'''
-        pred_q_values = self.critic(states, info)
-        return pred_q_values
+
     
     def _calc_returns_list(self, rewards:List[int]) -> List[np.ndarray]:
         '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
@@ -93,7 +86,6 @@ class LightningA2C(pl.LightningModule):
         '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
         Input: Sequence[int] -> Output: Sequence[torch(int)]
         '''
-        # returns = torch.zeros_like(rewards, dtype=torch.float)
         returns = torch.zeros(rewards.shape).to(rewards.device)
         R = torch.tensor(0.0)
         for idx, r in enumerate(torch.flip(rewards, dims=[0])):
@@ -109,6 +101,14 @@ class LightningA2C(pl.LightningModule):
 
         return cumulative_returns
     
+    def calculate_value(self,
+                        states:Dict[str, Any] | list[Dict[str, Any]], 
+                        info:Optional[str | list[str]]=None
+                        ) -> Tensor: 
+        '''Critic calculates value by batch'''
+        pred_q_values = self.critic(states, info)
+        return pred_q_values
+    
     def forward(self, states, info) -> Tensor: 
         return self.calculate_value(states, info)
     
@@ -117,25 +117,25 @@ class LightningA2C(pl.LightningModule):
         rewards=batch['rewards']
         observations=batch['observations']
         infos=batch['infos']
-        
         values=self(observations, infos)
         cumulative_returns = self.calculate_returns(rewards).to(values.device)
         critic_loss = F.smooth_l1_loss(cumulative_returns, values)
+
         return critic_loss
     
     def configure_optimizers(self, lr: float):
-    
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
+    
+    def state_dict(self):
+        '''Overriding state dict to save only lora + q-value head'''
+        state = super().state_dict()
+        for name in list(state.keys()):
+            if "lora" not in name and "q_value_head" not in name:  # <-- adapt the condition to your use case
+                state.pop(name)
+        return state
+    
+    def load_state_dict(self, state_dict, strict=True):
+        # Create a new state dict with only matching keys for LoRA and q_value_head
+        lora_and_q_value_head_state = {k: v for k, v in state_dict.items() if "lora" in k or "q_value_head" in k}
+        super().load_state_dict(lora_and_q_value_head_state, strict=strict)
 
-        
-    # def configure_optimizers(self, lr: float):
-        
-    #     optimizer=torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
-    #     _scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
-    #     lr_scheduler_config={
-    #         'scheduler':_scheduler, 
-    #         'interval':'epoch',
-    #         'frequency':1
-    #     }
-    #     return {'optimizer':optimizer, 
-    #             'scheduler':lr_scheduler_config}

@@ -59,7 +59,7 @@ class HuggingFaceGeneratorConfig(BaseConfig):
         description='Whether to set the model to evaluation mode.',
     )
     compile_model: bool = Field(
-        False,
+        True,
         description='Whether to compile the model for faster inference.',
     )
     quantization: bool = Field(
@@ -81,6 +81,18 @@ class HuggingFaceGeneratorConfig(BaseConfig):
     batch_size: int = Field(
         2,
         description='The number of prompts to process at once.',
+    )
+    gradient_checkpointing_enable:bool=Field(
+        True, 
+        description='Whether to enable gradient checkpointing to save memory or not'
+    )
+    enable_flash_attention:bool=Field(
+        False, 
+        description='Whether to enable flash attention on model or not'
+    )
+    device_map_auto:bool=Field(
+        False, 
+        description='Whether to enable auto device map'
     )
 
 
@@ -104,10 +116,12 @@ class HuggingFaceGenerator:
         from transformers import pipeline
         from langchain_core.prompts import PromptTemplate
 
-        model_kwargs={'device_map':'auto'}
-
+        model_kwargs={}
         self.tokenizer_call_kwargs={'return_tensors':'pt', 
                                     'padding':'longest'}
+        
+        if config.device_map_auto: 
+            model_kwargs['device_map'] = 'auto'
 
         if config.quantization:
             from transformers import BitsAndBytesConfig
@@ -120,6 +134,9 @@ class HuggingFaceGenerator:
             )
 
             model_kwargs['quantization_config'] = nf4_config
+            
+        if config.enable_flash_attention: 
+            model_kwargs['attn_implementation'] = "flash_attention_2"
 
         model = AutoModelForCausalLM.from_pretrained(
                 config.pretrained_model_name_or_path,
@@ -154,6 +171,11 @@ class HuggingFaceGenerator:
             model = torch.compile(model, fullgraph=True)
             
         model.generation_config.pad_token_id = tokenizer.pad_token_id
+        
+        if config.gradient_checkpointing_enable: 
+            gradient_checkpointing_kwargs = {}
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        
         # Set persistent attributes
         self.model = model
         self.tokenizer = tokenizer

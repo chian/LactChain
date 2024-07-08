@@ -70,7 +70,6 @@ class LightningA2C(pl.LightningModule):
     
         return batch_mapped_actions, actions, contexts, drop_indices
 
-    
     def _calc_returns_list(self, rewards:List[int]) -> List[np.ndarray]:
         '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
         Input: Sequence[int] -> Output: Sequence[torch(int)]
@@ -93,9 +92,13 @@ class LightningA2C(pl.LightningModule):
             returns[idx]=R
         return returns
     
-    def calculate_returns(self, rewards:Tensor) -> Tensor:
-        
-        cumulative_returns=self._calc_returns(rewards)
+    def calculate_returns(self, rewards:Tensor | list[Tensor]) -> Tensor:
+        '''Function that calculates tensor of returns from a tensor or list of batch tensor rewards'''
+
+        if isinstance(rewards, Tensor): 
+            cumulative_returns=self._calc_returns(rewards)
+        elif isinstance(rewards, list): 
+            cumulative_returns=torch.stack(self._calc_returns_list(rewards))
         cumulative_returns = (cumulative_returns - cumulative_returns.mean()) /\
                                     (cumulative_returns.std() + 1e-12)
 
@@ -126,16 +129,16 @@ class LightningA2C(pl.LightningModule):
     def configure_optimizers(self, lr: float):
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
     
-    def state_dict(self):
-        '''Overriding state dict to save only lora + q-value head'''
-        state = super().state_dict()
-        for name in list(state.keys()):
-            if "lora" not in name and "q_value_head" not in name:  # <-- adapt the condition to your use case
-                state.pop(name)
-        return state
+    # def state_dict(self):
+    #     '''Overriding state dict to save only lora + q-value head'''
+    #     state = super().state_dict()
+    #     for name in list(state.keys()):
+    #         if "lora" not in name and "q_value_head" not in name:  # <-- adapt the condition to your use case
+    #             state.pop(name)
+    #     return state
     
-    def load_state_dict(self, state_dict, strict=True):
-        # Create a new state dict with only matching keys for LoRA and q_value_head
-        lora_and_q_value_head_state = {k: v for k, v in state_dict.items() if "lora" in k or "q_value_head" in k}
-        super().load_state_dict(lora_and_q_value_head_state, strict=strict)
+    # def load_state_dict(self, state_dict, strict=True):
+    #     # Create a new state dict with only matching keys for LoRA and q_value_head
+    #     lora_and_q_value_head_state = {k: v for k, v in state_dict.items() if "lora" in k or "q_value_head" in k}
+    #     super().load_state_dict(lora_and_q_value_head_state, strict=strict)
 

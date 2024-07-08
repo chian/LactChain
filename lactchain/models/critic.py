@@ -146,6 +146,7 @@ class ValueFunction(nn.Module):
                 states:Dict[str, Any] | list[Dict[str, Any]], 
                 infos:Dict[str, Any] | list[Dict[str, Any]]
                 ) -> Tensor: 
+        
         states=[states] if isinstance(states, dict) else states
         states=[str(state) for state in states]
         infos=[str(info['info']) for info in infos]

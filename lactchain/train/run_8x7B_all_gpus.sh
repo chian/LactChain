@@ -1,0 +1,18 @@
+fabric run critic_train_lightning.py \
+    --actor_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/a60832cb6c88d5cb6e507680d0e9996fbad77050'\
+    --critic_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'\
+    --log_wandb False \
+    --logging_level 'info' \
+    --gamma 0.99 \
+    --learning_rate 1e-4 \
+    --num_epochs 1 \
+    --num_episodes 10 \
+    --global_buffer_size 4 \
+    --collection_batch_size 4 \
+    --fabric_sampler False \
+    --train_batch_size 2 \
+    --checkpoints_total_limit 10 \
+    --checkpointing_steps 10 \
+    --output_dir 'actor-finetuned-critic'\
+    --devices 1 \
+    --accelerator cuda \

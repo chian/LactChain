@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 from gymnasium import spaces
 import gymnasium as gym
 import numpy as np
@@ -199,7 +200,13 @@ class VectorizedGridWorld(gym.Env):
         return self.state, total_reward, done, truncated, {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
     
     # {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
-
+    
+    @staticmethod
+    def create_infos_from_(sampled_states:Tensor) -> Dict[str, str] | List[Dict[str, str]]: 
+        '''Takes a sampled state tensor of shape [3, num_samples]'''
+        
+        ...
+        
     @staticmethod
     def process_info(grid_size:int | list[int], 
                      goal_position:Tuple[int, int] | list[Tuple[int, int]]

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import List, Callable, Dict, Any, Tuple, Union, Optional
 from pathlib import Path
 from torch import Tensor
@@ -6,14 +7,96 @@ import torch
 import gymnasium as gym
 from datasets import Dataset as HFDataset
 from argparse import ArgumentParser
+import os, shutil, math, logging 
+from lightning import Fabric
+from lightning.fabric.utilities import AttributeDict
+from wandb.integration.lightning.fabric import WandbLogger
+from datasets import Dataset as HFDataset
+from argparse import ArgumentParser
+import numpy as np
 
+from lactchain.models.lightning_agent import LightningA2C
 from lactchain.environments.grid_world import GridEnvironment
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
+from lactchain.utils import configure_logger
+from lactchain.environments.grid_world import make_env, process_environment_outputs
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ['TORCH_LOGS']="+dynamo"
+os.environ['TORCHDYNAMO_VERBOSE']='1'
+# default actor path
+ACTOR_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'
+CRITIC_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'
 
+def argparse(): 
+    parser=ArgumentParser()
+    parser.add_argument(
+        '--actor_path', 
+        type=str, 
+        default=ACTOR_PATH, 
+        help='''Path to frozen causal model'''
+        )
+    parser.add_argument(
+        '--critic_path', 
+        type=str, 
+        default=CRITIC_PATH, 
+        help='''Path to trainable embedding model'''
+        )
+    parser.add_argument(
+        '--global_num_samples',
+        type=int, 
+        default=10000,
+        help='Number of states to sample globally'
+    )
 
+def sample_data(env:gym.Env, num_samples:int) -> Tuple[Tensor, list[str]]:
+    '''
+    Uses torch.Categorical to sample random (x, y, orientation) coordinates from an env 
+    
+    Inputs: 
+    ======
+    env: gym.Env 
+        Gym environment to sample from...this can be a vector environment 
+    num_samples:int 
+        The number of samples to sample from the environment 
+    
+    Output: 
+    ======
+    sampled_states: Tensor [B * Num_env, Num_samples]
+        The tensor that stores 
+    infos: list[str]
+    
+    '''
+    '''GRAB OBSERVATION SET --> TORCH MULTINOMIAL --> SAMPLE
+    BATCH OF STATES --> PASS INTO LLM TWICE --> ENV.RESET()
+    --> IF ASYNC, SEND FULL BATCH IN ELSE SEND IN SEQUENTIALLY
+    '''
+    distro_coord_space=env.coordinate_space_distro
+    sampled_coords=distro_coord_space.sample((num_samples, 2))
+    distro_orientation_space=env.orientation_set_distro
+    sampled_orientations=distro_orientation_space.sample((num_samples,))
+    
+    infos=[env.info]*num_samples
+    sampled_states=torch.cat([sampled_coords, sampled_orientations.unsqueeze(1)], dim=1)
+    
+    return sampled_states, infos
 
+def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
+    '''
+    Takes in sampled_state_tensor 
+    
+    Returns a batch of sampled_states
+    Outputs:
+    states: list[Dict[str, int]]
+    infos: list[str]
+    '''
+    rand_batch_indices=torch.randint(0, sampled_states.size(0), (batch_size,))
+    sampled_state_tensor=sampled_states[rand_batch_indices]
+
+    states=[{'x':x, 'y':y, 'orientation':orientation} for (x, y, orientation) in sampled_state_tensor]
+
+    return states, [infos[info] for info in rand_batch_indices]
 
 def main():
     logger = configure_logger()
@@ -32,15 +115,12 @@ def main():
     
     vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(args.per_rank_batch_size)])
     
-    logger.info(f'')
     agent=LightningA2C(args.actor_path, actor_config, lora_config, 
                        args.critic_path, critic_config, args.gamma)
     logger.info(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
-    optimizer = agent.configure_optimizers(args.learning_rate)
     
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
-        breakpoint()
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
         else:
@@ -62,8 +142,16 @@ def main():
             agent.load_state_dict(full_checkpoint['model'])
             optimizer.load_state_dict(full_checkpoint['optimizer'])
     
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     agent, optimizer = fabric.setup(agent, optimizer)
+    
+    samples_per_rank=math.ceil(args.global_num_samples // world_size)
+    logger.info(f'SAMPLING {samples_per_rank} STATES FOR RANK')
+    
+    breakpoint()
+    local_sampled_states, local_infos=sample_data(vector_env, samples_per_rank)
+    
+    while buffer_size<samples_per_rank: 
+        ...
     
     for episode in range(args.num_episodes):
         

@@ -55,10 +55,18 @@ class LightningA2C(pl.LightningModule):
             )
         
         self._model_trainable_params=dedent(f'''Total number of parameters: {self._total_params:,}\nTotal number of trainable parameters: {self._total_trainable_params:,}\nPercentage of parameters trained: {(self._total_trainable_params/self._total_params) * 100}%''')
-        
+    
     @property
     def model_trainable_params(self): 
         return self._model_trainable_params
+    
+    @torch.inference_mode()
+    def compile_and_tokenize(self, 
+                             states:Dict[str, Any] | list[Dict[str, Any]], 
+                             infos:Dict[str, Any] | list[Dict[str, Any]]
+                             ) -> Tensor: 
+        '''compile and tokenize the strings'''
+        return self.critic.compile_and_tokenize(states, infos)
         
     @torch.inference_mode()
     def sample_actions(self,
@@ -104,23 +112,60 @@ class LightningA2C(pl.LightningModule):
 
         return cumulative_returns
     
+    # def calculate_value(self,
+    #                     states:Dict[str, Any] | list[Dict[str, Any]], 
+    #                     info:Optional[str | list[str]]=None
+    #                     ) -> Tensor: 
+    #     '''Critic calculates value by batch'''
+    #     pred_q_values = self.critic(states, info)
+    #     return pred_q_values
+    
+    # def forward(self, states, info) -> Tensor: 
+    #     return self.calculate_value(states, info)
+    
     def calculate_value(self,
-                        states:Dict[str, Any] | list[Dict[str, Any]], 
-                        info:Optional[str | list[str]]=None
+                        **inputs:Dict[str, Any]
                         ) -> Tensor: 
         '''Critic calculates value by batch'''
-        pred_q_values = self.critic(states, info)
+        pred_q_values = self.critic(**inputs)
         return pred_q_values
     
-    def forward(self, states, info) -> Tensor: 
-        return self.calculate_value(states, info)
+    def forward(self, **inputs:Dict[str, Any]) -> Tensor: 
+        return self.calculate_value(**inputs)
     
-    def training_step(self, batch: Dict[str, Tensor]):
+    # def training_step(self, batch: Dict[str, Tensor]):
 
-        rewards=batch['rewards']
-        observations=batch['observations']
-        infos=batch['infos']
-        values=self(observations, infos)
+    #     rewards=batch['rewards']
+    #     observations=batch['observations']
+    #     infos=batch['infos']
+    #     values=self(observations, infos)
+    #     cumulative_returns = self.calculate_returns(rewards).to(values.device)
+    #     critic_loss = F.smooth_l1_loss(cumulative_returns, values)
+
+    #     return critic_loss
+    
+        
+    def training_step(self, 
+                      rewards:Tensor, 
+                      inputs:Dict[str, Tensor]
+                      ) -> Tensor:
+        '''Function that takes in a reward tensor of shape B and a Dict of inputs where the input_ids are 
+        of shape B x Seq_len
+        
+        Inputs: 
+        ======
+        Rewards: Tensor
+            Tensor of rewards of shape B 
+        Inputs: Dict[str, Tensor]
+            Inputs dictionary of shape B x Seq_len that 
+            contains batch inputs for model 
+            
+        Output: 
+        ======
+        critic_loss: Tensor 
+            loss of shape B
+        '''
+        values=self(**inputs)
         cumulative_returns = self.calculate_returns(rewards).to(values.device)
         critic_loss = F.smooth_l1_loss(cumulative_returns, values)
 

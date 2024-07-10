@@ -197,6 +197,22 @@ class VectorizedGridWorld(gym.Env):
         done = (self.state['x'], self.state['y']) == (0, 0)
         truncated = False  # set your own condition for truncated if needed
         return self.state, total_reward, done, truncated, {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
+    
+    # {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
+
+    @staticmethod
+    def process_info(grid_size:int | list[int], 
+                     goal_position:Tuple[int, int] | list[Tuple[int, int]]
+                     ) -> Dict[str, str] | List[Dict[str, str]]: 
+        '''Helper function that compiles a string prompt from the information coordinates'''
+
+        if isinstance(grid_size, list):
+            assert isinstance(goal_position, list), f'Goal position must also be a list if grid size is list for batching'
+            ...
+        else: 
+            assert isinstance(goal_position, Tuple), f'Goal position must be a tuple if grid size is an int'
+            ...        
+        return {'info': f'Grid is size {grid_size}, goal position is at {goal_position}'}
 
     def _compute_reward(self) -> int:
         if (self.state['x'], self.state['y']) == self.goal_position:
@@ -207,8 +223,11 @@ class VectorizedGridWorld(gym.Env):
 def make_env():
     return VectorizedGridWorld()
 
+
 def process_environment_outputs(vector_observations:OrderedDict,
-                                vector_info:Dict[str, np.ndarray]) -> list[Dict[str, Any]]:
+                                vector_info:Dict[str, np.ndarray]
+                                ) -> list[Dict[str, Any]]:
+    
     obs_list=[]
     info_list=[]
     for idx, (_, info) in enumerate(zip(vector_observations['orientation'], vector_info['info'])):
@@ -216,6 +235,7 @@ def process_environment_outputs(vector_observations:OrderedDict,
         info_element={'info':info}
         obs_list.append(obs_element)
         info_list.append(info_element)
+        
     return obs_list, info_list
 
 

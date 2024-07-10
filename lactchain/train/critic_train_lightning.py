@@ -4,12 +4,9 @@ from torch import Tensor
 import torch
 import gymnasium as gym
 from argparse import ArgumentParser
-import lightning as pl
 from lightning import Fabric
-from torch.utils.data import DistributedSampler, BatchSampler
+from torch.utils.data import DistributedSampler, BatchSampler, RandomSampler
 from argparse import ArgumentParser
-import itertools
-from operator import itemgetter 
 import numpy as np
 from pydantic import Field
 from lightning.fabric.utilities import AttributeDict
@@ -17,6 +14,8 @@ import logging
 from wandb.integration.lightning.fabric import WandbLogger
 import os, shutil
 from lightning.fabric.utilities import AttributeDict
+from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from lactchain.models.lightning_agent import LightningA2C
 from lactchain.models.critic import ValueFunctionConfig
@@ -34,7 +33,7 @@ CRITIC_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--S
 class FabricConfig(BaseConfig): 
     '''Base Config for running fabric accelerator'''
     accelerator:str=Field(
-        default='gpu', 
+        default='cpu', 
         description='What kind of accelerator to use for Fabric'
     )
     devices:int=Field(
@@ -100,12 +99,6 @@ def argparse():
         help='''Path to trainable embedding model'''
         )
     parser.add_argument(
-        '--num_episodes', 
-        type=int, 
-        default=100, 
-        help='Number of episodes to run'
-    )
-    parser.add_argument(
         '--gamma',
         type=float, 
         default=0.99, 
@@ -118,23 +111,41 @@ def argparse():
         help='''Learning Rate for Optimizer'''
         )
     parser.add_argument(
-        '--global_buffer_size', 
+        '--num_episodes', 
         type=int, 
-        default=5, 
-        help='''The desired max length of the buffer after gathering from all local ranks'''
-        )
+        default=100, 
+        help='Number of episodes to run'
+    )
     parser.add_argument(
-        '--per_rank_batch_size', 
-        type=int, 
-        default=8, 
-        help='''The batch size/num_envs/sampler_batch_size'''
-        )
-    parser.add_argument(
-        '--update_epochs', 
+        '--num_epochs', 
         type=int, 
         default=10, 
         help='''Number of epochs to train on during the learning phase'''
         )
+    parser.add_argument(
+        '--global_buffer_size', 
+        type=int, 
+        default=10000, 
+        help='''The desired max length of the buffer after gathering from all local ranks'''
+        )
+    parser.add_argument(
+        '--collection_batch_size', 
+        type=int, 
+        default=32, 
+        help='''The batch size when collecting experience for buffer; also the same as the environment'''
+        )
+    parser.add_argument(
+        '--train_batch_size', 
+        type=int, 
+        default=4, 
+        help='''Sampling batch size to train on '''
+        )
+    parser.add_argument(
+        "--log_wandb",
+        type=bool,
+        default=False,
+        help="Whether or not to use fabric.setup or not for the dataloader",
+    )
     parser.add_argument(
         "--resume_from_checkpoint",
         type=str,
@@ -167,11 +178,11 @@ def argparse():
     )
     return parser.parse_args()
 
-
 def unfold_list_of_lists(list_of_list:list[list[Any]]) -> list: 
     '''Unfolds a list of lists into a single large list that preserves order'''
-    unfolded_list=list(itertools.chain.from_iterable(list_of_list))
+    unfolded_list=[item for sublist in list_of_list for item in sublist]
     return unfolded_list
+
 
 def train(
     fabric: Fabric,
@@ -181,36 +192,41 @@ def train(
     data: Dict[str, list[np.ndarray | Dict[str, Any]]],
     args: ArgumentParser,
     logger:Optional[logging.Logger]=None
-):        
-
-    # rewards=torch.stack(unfold_list_of_lists(data['rewards']))
-    rewards=torch.cat(data['rewards'])
-    observations=unfold_list_of_lists(data['observations'])
-    infos=unfold_list_of_lists(data['infos'])
-    # total_data_points=len(torch.stack(unfold_list_of_lists(data['rewards'])))
-    logger.info(f'''TOTAL GATHERED DATA LENGTH: {len(rewards):,}''')
-
-    indexes=list(range(len(rewards)))
-    sampler = DistributedSampler(
-        indexes, num_replicas=fabric.world_size, rank=fabric.global_rank, shuffle=True
-    )
-    sampler = BatchSampler(sampler, batch_size=args.per_rank_batch_size, drop_last=False)
+    ):    
+    rewards=data["rewards"]
+    inputs=data['batched_inputs']
+    
+    indices=list(range(rewards.shape[0]))
+    logger.info(f'REWARDS:{rewards}\nREWARDS SHAPE: {rewards.shape}\nTOTAL INDICES: {indices}\nLENGTH OF INDICES: {len(indices)}\n')
+    
+    if args.fabric_sampler:
+        sampler=RandomSampler(indices)
+        sampler=BatchSampler(sampler, batch_size=args.collection_batch_size, drop_last=False)
+        sampler=fabric.setup_dataloaders(sampler, use_distributed_sampler=False)
+    else:  
+        sampler = DistributedSampler(
+            indices, num_replicas=fabric.world_size, rank=fabric.global_rank, shuffle=True
+        )
+        sampler = BatchSampler(sampler, batch_size=args.train_batch_size, drop_last=False)
 
     with torch.autograd.set_detect_anomaly(True):
-        for epoch in range(args.update_epochs):
+        for epoch in range(args.num_epochs):
             epoch_loss=0
             sampler.sampler.set_epoch(epoch)
             for batch_indices in sampler:
+                logger.info(f'''Batch_Indices for rank {fabric.global_rank}: {batch_indices}''')
+                fabric.barrier()
                 optimizer.zero_grad()
-                # selected_rewards=[data['rewards'][index] for index in batch_indices]
-                # selected_observations=[data['observations'][index] for index in batch_indices]
-                # selected_infos=[data['infos'][index] for index in batch_indices]
-                selected_rewards=rewards[[batch_indices]]
-                selected_observations=list(itemgetter(*batch_indices)(observations))
-                selected_infos=list(itemgetter(*batch_indices)(infos))
+                selected_rewards=rewards[batch_indices] # shape [B, T]
+                selected_inputs={'input_ids':inputs['input_ids'][batch_indices], 
+                                 'attention_mask':inputs['attention_mask'][batch_indices]}
+                
+                logger.debug(f'Batch Indices:\n{batch_indices}')
+                logger.debug(f'Selected Rewards:\n{selected_rewards}')
+                logger.debug(f'Selected Input_Ids:\n{selected_inputs["input_ids"].shape}')
+                logger.debug(f'Selected Attention_Masks:\n{selected_inputs["attention_mask"].shape}')
 
-                batch={'rewards':selected_rewards, 'observations':selected_observations, 'infos':selected_infos}
-                loss = agent.training_step(batch) 
+                loss = agent.training_step(selected_rewards, selected_inputs) 
                 epoch_loss+=loss
         
                 fabric.backward(loss)
@@ -222,25 +238,39 @@ def train(
             lr_scheduler.step()
 
 def main():
+    args=argparse()
     logger = configure_logger()
-    wandb_logger=WandbLogger(project="my-project", offline=True)
+    wandb_logger=WandbLogger(project="my-project", offline=args.log_wandb)
     # Initialize Fabric
-    fabric = Fabric(loggers=wandb_logger)
-    rank = fabric.global_rank # rank on global devices 
+    fabric = Fabric(loggers=wandb_logger, 
+                    # accelerator='cpu'
+                    )
+    global_rank = fabric.global_rank # rank on global devices 
     world_size = fabric.world_size # total num devices 
     device = fabric.device
     local_rank=fabric.local_rank # rank on local node 
     
-    args=argparse()
+    global_buffer_size=args.global_buffer_size
+    local_buffer_size=int(global_buffer_size // world_size)
+    
+    logging.info(f'''LOGGING WITH THE FOLLOWING:\n\
+                 GLOBAL BUFFER SIZE: {global_buffer_size}\
+                 \nNUMBER OF RANKS: {world_size}\
+                 \nLOCAL BUFFER SIZE: {local_buffer_size}\  
+                 \nBATCH SIZE PER RANK: {args.collection_batch_size}\
+                 \nNUM EPOCHS: {args.num_epochs}\
+                 \nNUM EPISODES: {args.num_episodes}
+                 ''')
+    
     actor_config=ActorConfig()
     lora_config=LoraConfigSettings()
     critic_config=ValueFunctionConfig()
     
-    vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(args.per_rank_batch_size)])
+    vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(args.collection_batch_size)])
     
     agent=LightningA2C(args.actor_path, actor_config, lora_config, 
                        args.critic_path, critic_config, args.gamma)
-    logger.info(f'Model Trainable Params:\n{agent.model_trainable_params}')
+    logger.info(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
     optimizer = agent.configure_optimizers(args.learning_rate)
     
     # Potentially load in the weights and states from a previous save
@@ -270,31 +300,42 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     agent, optimizer = fabric.setup(agent, optimizer)
     
+    progress_bar = tqdm(
+        range(0, args.collection_batch_size),
+        initial=0,
+        desc="Steps",
+        # Only show the progress bar once on each machine.
+        disable=not fabric.rank
+    )
+    
     for episode in range(args.num_episodes):
         
         fabric.barrier() # sync per episode
-        logger.info(f'Starting Episode {episode+1}...') 
+        logger.info(f'Starting Episode {episode+1} on all ranks...') if global_rank==0 else None
         obs, info = vector_env.reset()
         obs, info=process_environment_outputs(obs, info)
         observations=[]
         rewards=[]
         infos=[]
+        # batched_inputs=[] # list for storing tokenized inputs
+        batched_inputs={}
+        
         steps_kept=0
         buffer_size=0
         
         with torch.autograd.set_detect_anomaly(True):
             with torch.no_grad(): 
-                per_rank_buffer_size=int(args.global_buffer_size / world_size)
-                logger.info(f'Collecting Experience for Rank {rank}...')
+                logger.info(f'Collecting Experience for Rank {global_rank}...')
                 step=0
                 # since we will all_gather to make buffer, desired buffer_size = world_size * per_rank_observation_counts
-                while buffer_size<=per_rank_buffer_size: 
+                while buffer_size<=local_buffer_size: 
                     step+=1
                     try: 
                         batch_mapped_actions, actions, contexts, drop_indices=agent.sample_actions(obs, info)
                         # TODO: if action is dropped, then send in default actions but do not collect 
                         next_obs, reward, done, truncated, info = vector_env.step(batch_mapped_actions)
                         next_obs, info=process_environment_outputs(next_obs, info)
+                        inputs=agent.compile_and_tokenize(next_obs, info)
 
                         if drop_indices:
                             filtered_obs=[next_obs.pop(drop_idx) for drop_idx in drop_indices]
@@ -307,26 +348,43 @@ def main():
                             observations.append(next_obs)
                             rewards.append(reward)
                             infos.append(info)
+                            # Merging with tensor concatenation
+                            for key in inputs:
+                                if key in batched_inputs:
+                                    # Concatenate tensors along dim=0 --> [B*n, T]
+                                    batched_inputs[key] = torch.cat((batched_inputs[key], inputs[key]), dim=0)
+                                else:
+                                    batched_inputs[key] = inputs[key]
                         
                         obs = next_obs
-                        logger.info(f'''Successfully parsed {args.per_rank_batch_size-len(drop_indices)} actions out of batch size {args.per_rank_batch_size} in step {step}, adding to replay buffer for rank {rank}...''')
+                        logger.info(f'''Successfully parsed {args.collection_batch_size-len(drop_indices)} actions out of batch size {args.collection_batch_size} in step {step}, adding to replay buffer for rank {global_rank}...''')
                         steps_kept+=1
                     except Exception as e: 
-                        logger.error(f'''Error when collecting experience from rank {rank}:\n{e}\nDropping Full Batch for Step {step}...''')
+                        logger.error(f'''Error when collecting experience from rank {global_rank}:\n{e}\nDropping Full Batch for Step {step}...''')
                         continue
                     
+                    progress_bar.update(1)
                     buffer_size = len(np.concatenate(rewards))
-                    logger.info(f'''Replay buffer size: {buffer_size} at step {step} for rank {rank}''')  
+                    logger.info(f'''RANK BUFFER SIZE: {buffer_size} AT STEP {step} FOR RANK {global_rank}''')  
                     
-        logger.info(f'''FOR RANK {rank}\nTOTAL STEPS:{step}\nSTEPS KEPT:{steps_kept}\nGATHERING DATA FROM RANK {rank}...''')
+        logger.info(f'''FOR RANK {global_rank} TOTAL STEPS:{step} STEPS KEPT:{steps_kept} GATHERING DATA FROM RANK {global_rank}...''')        
         fabric.barrier()
         local_data={
-            'rewards':[reward for reward in rewards], 
-            'observations':[observation for observation in observations], 
-            'infos':[info for info in infos]
+            'rewards':rewards, 
+            'batched_inputs':batched_inputs # shape list['input_ids':Tensor[B, Seq_len], 'attention_mask': Tensor[B, Seq_len]]
             }
+        # gathering and formatting data 
         gathered_data = fabric.all_gather(local_data)
-        fabric.log_dict({'Total_reward':np.sum(np.stack(rewards))})
+        gathered_data['rewards']=torch.stack(gathered_data['rewards']).flatten()
+        max_seq_len=gathered_data['batched_inputs']['input_ids'].shape[-1]
+        gathered_data['batched_inputs']['input_ids']=gathered_data['batched_inputs']['input_ids'].reshape(-1, max_seq_len)  
+        gathered_data["batched_inputs"]['attention_mask']=gathered_data["batched_inputs"]['attention_mask'].reshape(-1, max_seq_len) 
+         
+        logger.debug(f'REWARDS SHAPE: {gathered_data["rewards"].shape}')
+        logger.debug(f'INPUT_IDS SHAPE: {gathered_data["batched_inputs"]["input_ids"].shape}')
+        logger.debug(f'ATTENTION_MASK SHAPE: {gathered_data["batched_inputs"]["attention_mask"].shape}')
+        
+        fabric.log_dict({'TOTAL REWARD FOR ALL RANKS':np.sum(rewards)})
         
         train(fabric, agent, optimizer, lr_scheduler, gathered_data, args, logger)  
         

@@ -1,5 +1,5 @@
 from peft import get_peft_model, LoraConfig, get_peft_config
-from transformers import TrainingArguments, Trainer, AutoModel, AutoTokenizer
+from transformers import TrainingArguments, Trainer, AutoModel, AutoTokenizer, PreTrainedTokenizer
 import torch
 from torch import Tensor, nn, functional as F
 from textwrap import dedent
@@ -140,12 +140,12 @@ class ValueFunction(nn.Module):
     def load_from_checkpoint(cls, checkpoint:str, config:ValueFunctionConfig):
         critic=cls(checkpoint, config)
         return critic
-
-
-    def forward(self, 
-                states:Dict[str, Any] | list[Dict[str, Any]], 
-                infos:Dict[str, Any] | list[Dict[str, Any]]
-                ) -> Tensor: 
+    
+    def compile_and_tokenize(self,
+                             states:Dict[str, Any] | list[Dict[str, Any]], 
+                             infos:Dict[str, Any] | list[Dict[str, Any]]
+                             ) -> Tensor:
+        '''Function that compiles the states + infos info one list, then tokenizes it'''
         
         states=[states] if isinstance(states, dict) else states
         infos=[infos] if isinstance(infos, dict) else infos
@@ -154,6 +154,38 @@ class ValueFunction(nn.Module):
         
         states=[states+'\n'+info for states, info in zip(states, infos)]
         inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
+        
+        return inputs
+
+    # def forward(self, 
+    #             states:Dict[str, Any] | list[Dict[str, Any]], 
+    #             infos:Dict[str, Any] | list[Dict[str, Any]]
+    #             ) -> Tensor: 
+        
+    #     # states=[states] if isinstance(states, dict) else states
+    #     # infos=[infos] if isinstance(infos, dict) else infos
+    #     # states=[str(state) for state in states]
+    #     # infos=[str(info['info']) for info in infos]
+        
+    #     # states=[states+'\n'+info for states, info in zip(states, infos)]
+    #     # inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
+    #     outputs = self.model(**inputs)
+    #     last_hidden_states = outputs.last_hidden_state
+    #     q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
+    #     pred_q_values = q_values.mean(dim=-1)  # Take the mean of the first logit
+    #     return pred_q_values # shape B x 1
+    
+    def forward(self, 
+                **inputs:Dict[str, Any]
+                ) -> Tensor: 
+        
+        # states=[states] if isinstance(states, dict) else states
+        # infos=[infos] if isinstance(infos, dict) else infos
+        # states=[str(state) for state in states]
+        # infos=[str(info['info']) for info in infos]
+        
+        # states=[states+'\n'+info for states, info in zip(states, infos)]
+        # inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
         outputs = self.model(**inputs)
         last_hidden_states = outputs.last_hidden_state
         q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation

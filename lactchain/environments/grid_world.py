@@ -150,6 +150,7 @@ class VectorizedGridWorld(gym.Env):
         self.context = context
         self.render_mode = render_mode
         self.state = None
+        self._environment_info={'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
 
         self.coordinate_set_probability=np.ones(self.grid_size) / self.grid_size
         self.orientation_set_probability=np.ones(self.num_orientations) / self.num_orientations
@@ -163,6 +164,10 @@ class VectorizedGridWorld(gym.Env):
     def orientation_set_distro(self) -> Categorical:
         orientation_space_prob=torch.from_numpy(self.orientation_set_probability)
         return torch.distributions.Categorical(orientation_space_prob)
+    
+    @property
+    def environment_info(self): 
+        return self._environment_info
 
     def reset(self) -> Tuple[Dict[str, np.ndarray], Dict[str, str]]:
         self.state = {'x': 0, 'y': 0, 'orientation': 0}
@@ -202,10 +207,14 @@ class VectorizedGridWorld(gym.Env):
     # {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
     
     @staticmethod
-    def create_infos_from_(sampled_states:Tensor) -> Dict[str, str] | List[Dict[str, str]]: 
-        '''Takes a sampled state tensor of shape [3, num_samples]'''
-        
-        ...
+    def create_states_from_sampled_states(sampled_states:Tensor) -> List[Dict[str, int]]: 
+        '''Takes a sampled state tensor of shape [num_samples, 3] and returns '''
+        assert sampled_states.shape[1]==3, f'Sampled states tensor must have (x, y, orientation) per row'
+        states=[
+            {'x':x, 'y':y, 'orientation':orientation} 
+            for (x, y, orientation) in sampled_states
+            ]
+        return states
         
     @staticmethod
     def process_info(grid_size:int | list[int], 

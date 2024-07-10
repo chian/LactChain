@@ -50,15 +50,6 @@ class FabricDeviceConfig(BaseConfig):
     def __init__(self, devices:int): 
         super().__init__(devices=devices)
 
-# def save_only_trainable_weights(lightning_model:LightningA2C, path):
-#     '''Saves lora + q_value weights only'''
-#     torch.save(lightning_model.state_dict(), path)
-    
-# def load_only_trainable_weights(lightning_model:LightningA2C, path):
-#     '''Loads lora + q_value weights only'''
-#     state_dict = torch.load(path)
-#     lightning_model.load_state_dict(state_dict, strict=False)
-        
 def argparse(): 
     parser=ArgumentParser()
     parser.add_argument(
@@ -74,11 +65,17 @@ def argparse():
         help='''Path to trainable embedding model'''
         )
     parser.add_argument(
-        '--logging', 
+        '--logging_level', 
         type=str, 
         default='info',
         # choices=['debug, info, warning, error, critical'],
         help='The level to choose for logging'
+    )
+    parser.add_argument(
+        '--logging_save_path', 
+        type=str, 
+        default='training.log', 
+        help='The file to save the logging file to'
     )
     parser.add_argument(
         "--log_wandb",
@@ -196,11 +193,6 @@ def train(
     indices=list(range(rewards.shape[0]))
     logger.info(f'REWARDS:{rewards}\nREWARDS SHAPE: {rewards.shape}\nTOTAL INDICES: {indices}\nLENGTH OF INDICES: {len(indices)}\n')
     
-    # if args.fabric_sampler:
-    #     sampler=RandomSampler(indices)
-    #     sampler=BatchSampler(sampler, batch_size=args.train_batch_size, drop_last=False)
-    #     sampler=fabric.setup_dataloaders(sampler, use_distributed_sampler=False)
-    # else:  
     sampler = DistributedSampler(
         indices, num_replicas=fabric.world_size, rank=fabric.global_rank, shuffle=True
     )
@@ -236,10 +228,9 @@ def train(
 
 def main():
     args=argparse()
-    logger = configure_logger()
-    wandb_logger=WandbLogger(project="my-project", offline=args.log_wandb)
+    logger = configure_logger(args.logging_level, args.logging_save_path)
+    wandb_logger=WandbLogger(project="Lactchain-Critic-Tuning", offline=args.log_wandb)
     # Initialize Fabric
-    # fabric_config=FabricDeviceConfig(devices=args.devices)
     fabric = Fabric(loggers=wandb_logger, 
                     # **fabric_config.model_dump()
                     )
@@ -282,7 +273,6 @@ def main():
             # Get the most recent checkpoint
             dirs = os.listdir(args.output_dir)
             dirs = [d for d in dirs if d.startswith("critic_checkpoint")]
-            breakpoint()
             dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
             path = dirs[-1] if len(dirs) > 0 else None
                     
@@ -294,10 +284,8 @@ def main():
         else:
             fabric.print(f"Resuming from checkpoint {path}")
             full_checkpoint = fabric.load(os.path.join(args.output_dir, path))
-            breakpoint()
-            episode = int(path.split("-")[1])
-            episode = re.search(r'critic_checkpoint-(\d+)\.ckpt', path)
-            number = int(episode.group(1))
+            parsed_filename = re.search(r'critic_checkpoint-(\d+)\.ckpt', path)
+            episode = int(parsed_filename.group(1))
             agent.load_state_dict(full_checkpoint['model'])
             optimizer.load_state_dict(full_checkpoint['optimizer'])
     

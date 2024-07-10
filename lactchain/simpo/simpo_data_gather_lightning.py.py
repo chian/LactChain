@@ -16,11 +16,16 @@ from argparse import ArgumentParser
 import numpy as np
 
 from lactchain.models.lightning_agent import LightningA2C
-from lactchain.environments.grid_world import GridEnvironment
+from lactchain.environments.grid_world import GridEnvironment, VectorizedGridWorld
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
 from lactchain.utils import configure_logger
 from lactchain.environments.grid_world import make_env, process_environment_outputs
+
+'''GRAB OBSERVATION SET --> TORCH MULTINOMIAL --> SAMPLE BATCH OF STATES 
+--> PASS INTO LLM TWICE --> ENV.RESET()
+--> IF ASYNC, SEND FULL BATCH IN ELSE SEND IN SEQUENTIALLY
+'''
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['TORCH_LOGS']="+dynamo"
@@ -49,10 +54,21 @@ def argparse():
         default=10000,
         help='Number of states to sample globally'
     )
+    parser.add_argument(
+        '--batch_size', 
+        type=int, 
+        default=32, 
+        help='batch size for sampling states + infos'
+    )
 
-def sample_data(env:gym.Env, num_samples:int) -> Tuple[Tensor, list[str]]:
+def sample_data(env:VectorizedGridWorld, 
+                num_samples:int, 
+                batch_size:int
+                ) -> Tuple[List[Dict[str, Any]], List[str]]:
     '''
     Uses torch.Categorical to sample random (x, y, orientation) coordinates from an env 
+    Then we turn this information into list of {x, y, orientation} and list of repeating strings that comprise
+    the base info for the environment. Returned lists are of len batch_size 
     
     Inputs: 
     ======
@@ -63,40 +79,42 @@ def sample_data(env:gym.Env, num_samples:int) -> Tuple[Tensor, list[str]]:
     
     Output: 
     ======
-    sampled_states: Tensor [B * Num_env, Num_samples]
-        The tensor that stores 
-    infos: list[str]
-    
-    '''
-    '''GRAB OBSERVATION SET --> TORCH MULTINOMIAL --> SAMPLE
-    BATCH OF STATES --> PASS INTO LLM TWICE --> ENV.RESET()
-    --> IF ASYNC, SEND FULL BATCH IN ELSE SEND IN SEQUENTIALLY
+    sampled_states: list[Dict[str, Any]]
+        Stores a list of dictionaries that encode the {'x', 'y', 'orientation'} coordinates 
+    sampled_infos: list[str]
+        Stores a list of strings that 
     '''
     distro_coord_space=env.coordinate_space_distro
     sampled_coords=distro_coord_space.sample((num_samples, 2))
     distro_orientation_space=env.orientation_set_distro
     sampled_orientations=distro_orientation_space.sample((num_samples,))
     
-    infos=[env.info]*num_samples
+    infos=[env.environment_info]*num_samples
     sampled_states=torch.cat([sampled_coords, sampled_orientations.unsqueeze(1)], dim=1)
     
-    return sampled_states, infos
-
-def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
-    '''
-    Takes in sampled_state_tensor 
-    
-    Returns a batch of sampled_states
-    Outputs:
-    states: list[Dict[str, int]]
-    infos: list[str]
-    '''
     rand_batch_indices=torch.randint(0, sampled_states.size(0), (batch_size,))
     sampled_state_tensor=sampled_states[rand_batch_indices]
+    sampled_states=env.create_states_from_sampled_states(sampled_state_tensor)
+    sampled_infos=[infos[info] for info in rand_batch_indices]
+    
+    return sampled_states, sampled_infos
 
-    states=[{'x':x, 'y':y, 'orientation':orientation} for (x, y, orientation) in sampled_state_tensor]
+# def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
+#     '''
+#     Takes in sampled_state_tensor 
+    
+#     Returns a batch of sampled_states
+#     Outputs:
+#     states: list[Dict[str, int]]
+#     infos: list[str]
+#     '''
+#     rand_batch_indices=torch.randint(0, sampled_states.size(0), (batch_size,))
+    
+#     sampled_state_tensor=sampled_states[rand_batch_indices]
+#     sampled_states=VectorizedGridWorld.create_states_from_sampled_states(sampled_state_tensor)
+#     sampled_infos=[infos[info] for info in rand_batch_indices]
 
-    return states, [infos[info] for info in rand_batch_indices]
+#     return sampled_states, sampled_infos
 
 def main():
     logger = configure_logger()
@@ -147,11 +165,17 @@ def main():
     samples_per_rank=math.ceil(args.global_num_samples // world_size)
     logger.info(f'SAMPLING {samples_per_rank} STATES FOR RANK')
     
-    breakpoint()
-    local_sampled_states, local_infos=sample_data(vector_env, samples_per_rank)
-    
-    while buffer_size<samples_per_rank: 
+    obs, info = vector_env.reset()
+    obs, info=process_environment_outputs(obs, info)
+    # collecting next observations via batch
+    while buffer_size<samples_per_rank:
+        
+        sampled_states, local_infos=sample_data(vector_env, samples_per_rank, args.batch_size)
+         
+         
         ...
+        
+    breakpoint()
     
     for episode in range(args.num_episodes):
         

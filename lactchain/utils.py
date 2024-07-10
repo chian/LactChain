@@ -1,7 +1,13 @@
+from __future__ import annotations
+from typing import Optional
 import pkg_resources
 import os, logging
+from argparse import ArgumentParser
+import torch
 
-def configure_logger(level:str='debug') -> logging.Logger: 
+from lactchain.models.lightning_agent import LightningA2C
+
+def configure_logger(level:str='debug', logging_save_path:Optional[str]=None) -> logging.Logger: 
     '''Function for creating a logger to write to file and terminal'''
     LEVELS={
         'debug':logging.DEBUG, 
@@ -10,11 +16,12 @@ def configure_logger(level:str='debug') -> logging.Logger:
         'error':logging.ERROR, 
         'critical':logging.CRITICAL
     }
+        
     logger=logging.getLogger('Critic Training Logger')
     logger.setLevel(LEVELS.get(level))
     ch = logging.StreamHandler()
     ch.setLevel(LEVELS.get(level))
-    fh = logging.FileHandler("training.log")
+    fh = logging.FileHandler(logging_save_path)
     fh.setLevel(LEVELS.get(level))
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
@@ -29,6 +36,17 @@ def load_lactchain_path(checkpoint_dir:str='/checkpoints/') -> str:
     file_path = pkg_resources.resource_filename("lactchain", "")
     checkpoint_dir_path = file_path + checkpoint_dir
     return str(checkpoint_dir_path)
+
+# LEGACY / BACKUP UTILS
+def save_only_trainable_weights(lightning_model:LightningA2C, path:str):
+    '''Saves lora + q_value weights only'''
+    torch.save(lightning_model.state_dict(), path)
+    
+def load_only_trainable_weights(lightning_model:LightningA2C, path:str):
+    '''Loads lora + q_value weights only'''
+    state_dict = torch.load(path)
+    lightning_model.load_state_dict(state_dict, strict=False)
+        
 
 
 

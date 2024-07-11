@@ -51,14 +51,24 @@ PROMPT_TEMPLATE=dedent("""\
             All of your output must be stored in a json in the following format, and nothing else:
             {{
             "explain": "// Your explanation and logic goes here //"
-            "moves": // Your sequence of moves goes here //
+            "moves": "// Your sequence of moves goes here //"
             }}
             YOU ARE NOT ALLOWED TO OUTPUT ANYTHING ELSE THAT DOES NOT STRICTLY ADHERE TO THE JSON FORMAT ABOVE.
             TAKE NOTE THAT THE KEYS IN YOUR JSON OUTPUT SHOULD BE IN DOUBLE QUOTES
+            
+            An example of a correctly formatted output is this: 
+            
+            {{
+            "explain": "Since the grid size is 4 and the goal is at (4, 4) we need to move towards that bottom right position"
+            "moves": ["move forward", "turn left"]
+            }}
 
-            Here is your current position in grid world: {position}
-            Here is some extra information of grid world: {info}
-            [INST]
+            Here is your current position in grid world: 
+            {position}
+            Here is some extra information of grid world: 
+            {info}
+            
+            [/INST]
             """)
 
 class Strategy(object):

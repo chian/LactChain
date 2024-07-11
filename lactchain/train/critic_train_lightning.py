@@ -68,7 +68,6 @@ def argparse():
         '--logging_level', 
         type=str, 
         default='info',
-        # choices=['debug, info, warning, error, critical'],
         help='The level to choose for logging'
     )
     parser.add_argument(
@@ -155,12 +154,6 @@ def argparse():
         default="actor-finetuned-critic",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
-    parser.add_argument(
-        "--fabric_sampler",
-        type=bool,
-        default=False,
-        help="Whether to use the fabric sampler or not",
-    )
     return parser.parse_args()
 
 def unfold_list_of_lists(list_of_list:list[list[Any]]) -> list: 
@@ -231,9 +224,7 @@ def main():
     logger = configure_logger(args.logging_level, args.logging_save_path)
     wandb_logger=WandbLogger(project="Lactchain-Critic-Tuning", offline=args.log_wandb)
     # Initialize Fabric
-    fabric = Fabric(loggers=wandb_logger, 
-                    # **fabric_config.model_dump()
-                    )
+    fabric = Fabric(loggers=wandb_logger)
     # device settings
     global_rank = fabric.global_rank # rank on global devices 
     world_size = fabric.world_size # total num devices 

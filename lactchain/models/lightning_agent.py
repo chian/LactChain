@@ -171,6 +171,20 @@ class LightningA2C(pl.LightningModule):
 
         return critic_loss
     
+    @torch.inference_mode()
+    def calculate_advantages(self, 
+                             rewards:Tensor, 
+                             inputs:Dict[str, Tensor]
+                             ) -> Tensor: 
+        '''
+        Calculates Advantages Tensor Given a Tensor of Rewards shape [B] and inputs [B, T]
+        '''
+        values=self(**inputs)
+        cumulative_returns=self.calculate_returns(rewards).to(values.device)
+        advantages=(values-cumulative_returns)
+        
+        return advantages
+    
     def configure_optimizers(self, lr: float):
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
     

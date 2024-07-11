@@ -257,14 +257,22 @@ def main():
     optimizer = agent.configure_optimizers(args.learning_rate)
     
     # Potentially load in the weights and states from a previous save
+    # if args.resume_from_checkpoint:
+    #     if args.resume_from_checkpoint != "latest":
+    #         path = os.path.basename(args.resume_from_checkpoint)
+    #     else:
+    #         # Get the most recent checkpoint
+    #         dirs = os.listdir(args.output_dir)
+    #         dirs = [d for d in dirs if d.startswith("critic_checkpoint")]
+    #         dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+    #         path = dirs[-1] if len(dirs) > 0 else None
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
         else:
-            # Get the most recent checkpoint
             dirs = os.listdir(args.output_dir)
-            dirs = [d for d in dirs if d.startswith("critic_checkpoint")]
-            dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+            dirs = [d for d in dirs if d.startswith("critic_checkpoint") and d.endswith(".ckpt")]
+            dirs = sorted(dirs, key=lambda x: int(x.split("-")[1].split(".")[0]))
             path = dirs[-1] if len(dirs) > 0 else None
                     
         if path is None:
@@ -372,13 +380,19 @@ def main():
         train(fabric, agent, optimizer, lr_scheduler, gathered_data, args, logger)  
         
         # saving the model 
+        # if episode % args.checkpointing_steps == 0:
+        #     if fabric.global_rank==0:
+        #         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
+        #         if args.checkpoints_total_limit is not None:
+        #             checkpoints = os.listdir(args.output_dir)
+        #             checkpoints = [d for d in checkpoints if d.startswith("critic_checkpoint")]
+        #             checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
         if episode % args.checkpointing_steps == 0:
-            if fabric.global_rank==0:
-                # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
+            if fabric.global_rank == 0:
                 if args.checkpoints_total_limit is not None:
                     checkpoints = os.listdir(args.output_dir)
-                    checkpoints = [d for d in checkpoints if d.startswith("critic_checkpoint")]
-                    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                    checkpoints = [d for d in checkpoints if d.startswith("critic_checkpoint") and d.endswith(".ckpt")]
+                    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1].split(".")[0]))
                     # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
                     if len(checkpoints) >= args.checkpoints_total_limit:
                         num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1

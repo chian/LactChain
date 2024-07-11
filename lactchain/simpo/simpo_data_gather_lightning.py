@@ -27,6 +27,23 @@ from lactchain.environments.grid_world import make_env, process_environment_outp
 --> IF ASYNC, SEND FULL BATCH IN ELSE SEND IN SEQUENTIALLY
 '''
 
+# def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
+#     '''
+#     Takes in sampled_state_tensor 
+    
+#     Returns a batch of sampled_states
+#     Outputs:
+#     states: list[Dict[str, int]]
+#     infos: list[str]
+#     '''
+#     rand_batch_indices=torch.randint(0, sampled_states.size(0), (batch_size,))
+    
+#     sampled_state_tensor=sampled_states[rand_batch_indices]
+#     sampled_states=VectorizedGridWorld.create_states_from_sampled_states(sampled_state_tensor)
+#     sampled_infos=[infos[info] for info in rand_batch_indices]
+
+#     return sampled_states, sampled_infos
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['TORCH_LOGS']="+dynamo"
 os.environ['TORCHDYNAMO_VERBOSE']='1'
@@ -60,6 +77,12 @@ def argparse():
         default=32, 
         help='batch size for sampling states + infos'
     )
+    parser.add_argument(
+        '--resume_from_critic_checkpoint', 
+        type=int, 
+        default='latest', 
+        help='Critic Checkpoint to use'
+    )
 
 def sample_data(env:VectorizedGridWorld, 
                 num_samples:int, 
@@ -82,7 +105,7 @@ def sample_data(env:VectorizedGridWorld,
     sampled_states: list[Dict[str, Any]]
         Stores a list of dictionaries that encode the {'x', 'y', 'orientation'} coordinates 
     sampled_infos: list[str]
-        Stores a list of strings that 
+        Stores a list of strings that are passed into the causal model 
     '''
     distro_coord_space=env.coordinate_space_distro
     sampled_coords=distro_coord_space.sample((num_samples, 2))
@@ -98,23 +121,6 @@ def sample_data(env:VectorizedGridWorld,
     sampled_infos=[infos[info] for info in rand_batch_indices]
     
     return sampled_states, sampled_infos
-
-# def batch_sample_states(sampled_states:Tensor, infos:list[str], batch_size:int) -> Tensor:
-#     '''
-#     Takes in sampled_state_tensor 
-    
-#     Returns a batch of sampled_states
-#     Outputs:
-#     states: list[Dict[str, int]]
-#     infos: list[str]
-#     '''
-#     rand_batch_indices=torch.randint(0, sampled_states.size(0), (batch_size,))
-    
-#     sampled_state_tensor=sampled_states[rand_batch_indices]
-#     sampled_states=VectorizedGridWorld.create_states_from_sampled_states(sampled_state_tensor)
-#     sampled_infos=[infos[info] for info in rand_batch_indices]
-
-#     return sampled_states, sampled_infos
 
 def main():
     logger = configure_logger()
@@ -165,15 +171,22 @@ def main():
     samples_per_rank=math.ceil(args.global_num_samples // world_size)
     logger.info(f'SAMPLING {samples_per_rank} STATES FOR RANK')
     
-    obs, info = vector_env.reset()
-    obs, info=process_environment_outputs(obs, info)
+    prompts=[]
+    chosens=[]
+    rejects=[]
     # collecting next observations via batch
     while buffer_size<samples_per_rank:
         
+        obs, info = vector_env.reset()
+        obs, info=process_environment_outputs(obs, info)
+        
         sampled_states, local_infos=sample_data(vector_env, samples_per_rank, args.batch_size)
-         
-         
-        ...
+        batch_mapped_actions, actions, contexts, drop_indices=agent.sample_actions(sampled_states, local_infos)
+        next_obs, rewards, done, truncated, info = vector_env.step(batch_mapped_actions)
+        next_obs, info=process_environment_outputs(next_obs, info)
+        inputs=agent.compile_and_tokenize(next_obs, info)
+        advantages=agent.calculate_advantages(rewards, inputs)
+        
         
     breakpoint()
     

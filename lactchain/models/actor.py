@@ -14,6 +14,7 @@ from lactchain.models.backends.vllm_backend import VLLMGeneratorConfig, VLLMGene
 from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator, 
                                                            HuggingFaceGeneratorConfig, 
                                                            LoraConfigSettings)
+from lactchain.models.prompts import Prompts
 ############################################################################
 
 class ActorConfig(BaseConfig):
@@ -93,9 +94,15 @@ class Strategy(object):
         self.strategy=new_strategy
         return f'New strategy prompt is:\n{self.strategy}'
 
-'''Idea: have the strategy be a learnable prefix token you append in the prompt'''
-
 class LactChain(nn.Module):
+    
+    MODEL_MAP:dict[str, str]={
+        'meta-llama/Meta-Llama-3-8B-Instruct': 'llama-3', 
+        'meta-llama/Meta-Llama-3-8B':'llama-3',
+        'mistralai/Mistral-7B-v0.3': 'mistral-7b', 
+        'mistralai/Mixtral-8x7B-Instruct-v0.1':'mistral-7b'
+        }
+    
     def __init__(self,
                  model:str,
                  config:ActorConfig,
@@ -103,8 +110,13 @@ class LactChain(nn.Module):
                  ):
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
-        self._strategy=Strategy(PROMPT_TEMPLATE, STRATEGY)
+        assert model in self.MODEL_MAP.keys() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
+        self._prompt=Prompts(PROMPT_TEMPLATE, STRATEGY)
+        
+        self._strategy=Strategy(self._prompt.prompt_template, self._prompt.str)
         self.error_number=1000
+        self._outputs=''
+        
         backends={
             'langchain':LangChainGenerator,
             'vllm':VLLMGenerator,
@@ -210,11 +222,16 @@ class LactChain(nn.Module):
             strategy=self._strategy(state, info)
             strategies.append(strategy)
         outputs=self.generator.generate(strategies)
+        self._outputs=outputs
         parsed_outputs=self.batch_parse_outputs(outputs)
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
         mapped_actions, num_actions_dropped=self.map_actions(actions)
         return mapped_actions, actions, contexts, num_actions_dropped
+    
+    @property
+    def outputs(self): 
+        return self._outputs
     
         
 

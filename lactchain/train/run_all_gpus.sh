@@ -1,5 +1,5 @@
 fabric run critic_train_lightning.py \
-    --actor_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'\
+    --actor_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--meta-llama--Meta-Llama-3-8B-Instruct/snapshots/e1945c40cd546c78e41f1151f4db032b271faeaa'\
     --critic_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'\
     --logging_level 'info' \
     --logging_save_path 'logging.log' \

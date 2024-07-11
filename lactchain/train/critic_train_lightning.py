@@ -7,7 +7,7 @@ from torch.utils.data import DistributedSampler, BatchSampler, RandomSampler
 from lightning import Fabric
 from lightning.fabric.utilities import AttributeDict
 from wandb.integration.lightning.fabric import WandbLogger
-
+import pprint as pp
 import os, shutil, math, logging, re
 from argparse import ArgumentParser
 from pydantic import Field
@@ -340,6 +340,7 @@ def main():
                         steps_kept+=1
                     except Exception as e: 
                         logger.error(f'''Error when collecting experience from rank {global_rank}:\n{e}\nDropping Full Batch for Step {step}...''')
+                        logger.debug(f'''PROPOSED OUTPUTS:\n{pp.pformat(agent.actor.outputs)}\n\n\n''')
                         continue
                     
                     progress_bar.update(1)

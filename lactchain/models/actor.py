@@ -95,7 +95,7 @@ class Strategy(object):
         return f'New strategy prompt is:\n{self.strategy}'
 
 class LactChain(nn.Module):
-    
+
     MODEL_MAP:dict[str, str]={
         'meta-llama/Meta-Llama-3-8B-Instruct': 'llama-3', 
         'meta-llama/Meta-Llama-3-8B':'llama-3',
@@ -105,15 +105,19 @@ class LactChain(nn.Module):
     
     def __init__(self,
                  model:str,
+                 model_type:str,
                  config:ActorConfig,
                  lora_config:Optional[LoraConfigSettings]=None, 
                  ):
         super().__init__()
         '''We want the llm to output strategy prompt, and then the actual action'''
-        assert model in self.MODEL_MAP.keys() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
-        self._prompt=Prompts(PROMPT_TEMPLATE, STRATEGY)
+        assert model_type in self.MODEL_MAP.values() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
         
-        self._strategy=Strategy(self._prompt.prompt_template, self._prompt.str)
+        MODEL_TYPE=model_type
+        STRATEGY='gridworld'
+        self._prompt=Prompts(MODEL_TYPE, STRATEGY)
+        
+        self._strategy=Strategy(self._prompt.prompt, self._prompt.strategy)
         self.error_number=1000
         self._outputs=''
         
@@ -148,8 +152,17 @@ class LactChain(nn.Module):
     def save_model(self, save_path:str): 
         self.save_pretrained(save_path, from_pt=True) 
 
-    def compile_prompt(self, state:str, info:str) -> str:
-        return self._strategy(state, info)
+    def compile_prompts(self, state:str | list[str], info:str | list[str]) -> str | list[str]:
+        '''Returns the whole prompt as a str. You can pass in a list of states and infos to get 
+        a batch output of strategies 
+        '''
+        if isinstance(state, list) and isinstance(info, list): 
+            strategies=[]
+            for state, info in zip(state, info): 
+                strategies.append(self._strategy(state, info))
+            return strategies
+        else: 
+            return self._strategy(state, info)
 
     def parse_outputs(self, outputs:list[str]) -> list[str]:
         try:

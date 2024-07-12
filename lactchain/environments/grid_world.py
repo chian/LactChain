@@ -161,7 +161,7 @@ class VectorizedGridWorld(gym.Env):
         return torch.distributions.Categorical(coord_space_prob)
 
     @property
-    def orientation_set_distro(self) -> Categorical:
+    def orientation_space_distro(self) -> Categorical:
         orientation_space_prob=torch.from_numpy(self.orientation_set_probability)
         return torch.distributions.Categorical(orientation_space_prob)
     

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Any
 import pkg_resources
 import os, logging
 from argparse import ArgumentParser
@@ -36,6 +36,12 @@ def load_lactchain_path(checkpoint_dir:str='/checkpoints/') -> str:
     file_path = pkg_resources.resource_filename("lactchain", "")
     checkpoint_dir_path = file_path + checkpoint_dir
     return str(checkpoint_dir_path)
+
+
+def unfold_list_of_lists(list_of_list:list[list[Any]]) -> list: 
+    '''Unfolds a list of lists into a single large list that preserves order'''
+    unfolded_list=[item for sublist in list_of_list for item in sublist]
+    return unfolded_list
 
 # LEGACY / BACKUP UTILS
 def save_only_trainable_weights(lightning_model:LightningA2C, path:str):

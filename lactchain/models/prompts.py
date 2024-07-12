@@ -101,14 +101,14 @@ class Prompts:
         'gridworld':GRIDWORLD_STRATEGY
     }
     
-    template_type: str
+    model_type: str
     prompt_template: str = field(init=False) # field that depends on template_type, so init=False 
     
     strategy_type: str
     strategy_template: str = field(init=False)
     
     def __post_init__(self):
-        self.prompt_template = self.PROMPT_MAPPING.get(self.template_type)
+        self.prompt = self.PROMPT_MAPPING.get(self.model_type)
         self.strategy = self.STRATEGY_MAPPING.get(self.strategy_type)
         
 if __name__=="__main__": 

@@ -23,8 +23,17 @@ from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator,
                                                            LoraConfigSettings)
 
 class LightningA2C(pl.LightningModule): 
+    
+    MODEL_MAP:dict[str, str]={
+        'meta-llama/Meta-Llama-3-8B-Instruct': 'llama-3', 
+        'meta-llama/Meta-Llama-3-8B':'llama-3',
+        'mistralai/Mistral-7B-v0.3': 'mistral-7b', 
+        'mistralai/Mixtral-8x7B-Instruct-v0.1':'mistral-7b'
+        }
+    
     def __init__(self, 
                  actor_model:str,
+                 actor_model_type:str,
                  actor_config:ActorConfig,
                  lora_config:LoraConfigSettings,
                  critic_model:str,
@@ -34,7 +43,9 @@ class LightningA2C(pl.LightningModule):
         '''Lightning Model that Joins Frozen Actor and Trainable Critic'''
         super().__init__()
         
-        self.actor=LactChain(actor_model, actor_config, lora_config)
+        assert actor_model_type in self.MODEL_MAP.values() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
+        
+        self.actor=LactChain(actor_model, actor_model_type, actor_config, lora_config)
         self.critic=ValueFunction(critic_model, critic_config)
         
         self.gamma=gamma
@@ -55,10 +66,15 @@ class LightningA2C(pl.LightningModule):
             )
         
         self._model_trainable_params=dedent(f'''Total number of parameters: {self._total_params:,}\nTotal number of trainable parameters: {self._total_trainable_params:,}\nPercentage of parameters trained: {(self._total_trainable_params/self._total_params) * 100}%''')
-    
+        self._final_prompt_template=self.actor.compile_prompts('<STATE_GOES_HERE>', '<INFO_GOES_HERE>')
+        
     @property
     def model_trainable_params(self): 
         return self._model_trainable_params
+    
+    @property
+    def final_prompt_template(self):
+        return self._final_prompt_template
     
     @torch.inference_mode()
     def compile_and_tokenize(self, 
@@ -112,17 +128,6 @@ class LightningA2C(pl.LightningModule):
 
         return cumulative_returns
     
-    # def calculate_value(self,
-    #                     states:Dict[str, Any] | list[Dict[str, Any]], 
-    #                     info:Optional[str | list[str]]=None
-    #                     ) -> Tensor: 
-    #     '''Critic calculates value by batch'''
-    #     pred_q_values = self.critic(states, info)
-    #     return pred_q_values
-    
-    # def forward(self, states, info) -> Tensor: 
-    #     return self.calculate_value(states, info)
-    
     def calculate_value(self,
                         **inputs:Dict[str, Any]
                         ) -> Tensor: 
@@ -132,17 +137,6 @@ class LightningA2C(pl.LightningModule):
     
     def forward(self, **inputs:Dict[str, Any]) -> Tensor: 
         return self.calculate_value(**inputs)
-    
-    # def training_step(self, batch: Dict[str, Tensor]):
-
-    #     rewards=batch['rewards']
-    #     observations=batch['observations']
-    #     infos=batch['infos']
-    #     values=self(observations, infos)
-    #     cumulative_returns = self.calculate_returns(rewards).to(values.device)
-    #     critic_loss = F.smooth_l1_loss(cumulative_returns, values)
-
-    #     return critic_loss
     
         
     def training_step(self, 
@@ -173,12 +167,17 @@ class LightningA2C(pl.LightningModule):
     
     @torch.inference_mode()
     def calculate_advantages(self, 
-                             rewards:Tensor, 
+                             rewards:Tensor | np.ndarray, 
                              inputs:Dict[str, Tensor]
                              ) -> Tensor: 
         '''
         Calculates Advantages Tensor Given a Tensor of Rewards shape [B] and inputs [B, T]
         '''
+        if isinstance(rewards, np.ndarray): 
+            rewards=torch.from_numpy(rewards)
+            
+        rewards=rewards.to(self.device)  
+        inputs=inputs.to(self.device)
         values=self(**inputs)
         cumulative_returns=self.calculate_returns(rewards).to(values.device)
         advantages=(values-cumulative_returns)

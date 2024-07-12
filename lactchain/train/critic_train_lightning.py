@@ -27,6 +27,8 @@ os.environ['TORCH_LOGS']="+dynamo"
 os.environ['TORCHDYNAMO_VERBOSE']='1'
 # default actor path
 ACTOR_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'
+ACTOR_MODEL_TYPE='llama-3'
+
 CRITIC_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'
 
 class FabricDeviceConfig(BaseConfig): 
@@ -56,6 +58,12 @@ def argparse():
         '--actor_path', 
         type=str, 
         default=ACTOR_PATH, 
+        help='''Path to frozen causal model'''
+        )
+    parser.add_argument(
+        '--actor_model_type', 
+        type=str, 
+        default=ACTOR_MODEL_TYPE, 
         help='''Path to frozen causal model'''
         )
     parser.add_argument(
@@ -216,7 +224,6 @@ def train(
                 
             fabric.log_dict({"Epoch loss": epoch_loss})
             logger.info(f'Epoch Loss: {epoch_loss}')
-            
             lr_scheduler.step()
 
 def main():
@@ -251,8 +258,10 @@ def main():
     
     vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(args.collection_batch_size)])
     
-    agent=LightningA2C(args.actor_path, actor_config, lora_config, 
-                       args.critic_path, critic_config, args.gamma)
+    agent=LightningA2C(args.actor_path, args.actor_model_type,
+                       actor_config, lora_config, 
+                       args.critic_path, critic_config, 
+                       args.gamma)
     logger.info(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
     optimizer = agent.configure_optimizers(args.learning_rate)
     
@@ -298,6 +307,8 @@ def main():
         disable=not fabric.is_global_zero, 
         file=open(os.devnull, 'w')
     )
+    
+    logger.info(f'STARTING TRAINING WITH THIS PROMPT TEMPLATE:\n{agent.final_prompt_template} FOR ACTOR MODEL:\n{agent.actor} AND CRITIC MODEL:\n{agent.critic}')
     
     for episode in range(args.num_episodes):
         

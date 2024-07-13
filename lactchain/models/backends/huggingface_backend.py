@@ -79,7 +79,7 @@ class HuggingFaceGeneratorConfig(BaseConfig):
         description='Whether to use sampling.',
     )
     batch_size: int = Field(
-        2,
+        8,
         description='The number of prompts to process at once.',
     )
     gradient_checkpointing_enable:bool=Field(
@@ -87,12 +87,28 @@ class HuggingFaceGeneratorConfig(BaseConfig):
         description='Whether to enable gradient checkpointing to save memory or not'
     )
     enable_flash_attention:bool=Field(
-        False, 
+        True, 
         description='Whether to enable flash attention on model or not'
     )
     device_map_auto:bool=Field(
         False, 
         description='Whether to enable auto device map'
+    )
+    float16:bool=Field(
+        True, 
+        description='What dtype to have for the model: if flash attention, then float16 or bfloat16'
+    )
+    better_transformer:bool=Field(
+        False,
+        description='Whether to use better transformer or not'
+    )
+    enable_sdpa:bool=Field(
+        True, 
+        description="Whether to enable sdpa attnetion or not via torch context manager"
+    )
+    use_onnx:bool=Field(
+        False, 
+        description='Whether to use an onnx model or not for potentially faster inference.'
     )
 
 
@@ -112,16 +128,17 @@ class HuggingFaceGenerator:
         import torch
         from transformers import AutoTokenizer
         from transformers import AutoModelForCausalLM
-        from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
-        from transformers import pipeline
-        from langchain_core.prompts import PromptTemplate
 
         model_kwargs={}
+
         self.tokenizer_call_kwargs={'return_tensors':'pt', 
                                     'padding':'longest'}
         
         if config.device_map_auto: 
             model_kwargs['device_map'] = 'auto'
+        
+        if config.float16: 
+            model_kwargs['torch_dtype']=torch.float16
 
         if config.quantization:
             from transformers import BitsAndBytesConfig
@@ -147,6 +164,10 @@ class HuggingFaceGenerator:
             config.pretrained_model_name_or_path,
             trust_remote_code=True,
         )
+        
+        if config.better_transformer:
+            model=model.to_bettertransformer()
+        
         if lora_config: 
             lora_config=LoraConfig(**lora_config.model_dump())
             model=LoraModel(model, lora_config, adapter_name='default')
@@ -177,6 +198,7 @@ class HuggingFaceGenerator:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
         # Set persistent attributes
+        self.model_dtype = next(model.parameters()).dtype
         self.model = model
         self.tokenizer = tokenizer
         self._config = config
@@ -187,27 +209,32 @@ class HuggingFaceGenerator:
         return {'model':self._config, 
                 'lora':self._lora_config}
 
+    @torch.inference_mode()
     def _generate_batch(self, prompts:list[str], **kwargs:Optional[Dict[str, Any]]) -> list[str]: 
         '''generates batch outputs and then filters out attached input prompt via token slicing'''
 
         _tokenizer_call_kwargs={'return_tensors':'pt', 'padding':'longest'}
-        _model_call_kwargs={'num_return_sequences':1, 'max_new_tokens':500, 
+        _model_call_kwargs={'num_return_sequences':1, 'max_new_tokens':1000, 
                             'do_sample':True, 'temperature':0.1}
 
-        batch_encoding=self.tokenizer(prompts, **_tokenizer_call_kwargs)
-        batch_encoding = batch_encoding.to(self.model.device) # returns 
-        input_tokens_len=batch_encoding['input_ids'].shape[-1]
-        with torch.no_grad(): 
-            generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
-        
-        filtered_tokens=[row[input_tokens_len:] for row in generated_tokens]
-
-        decoded_outputs=self.tokenizer.batch_decode(filtered_tokens, 
-                                                    skip_special_tokens=True
-                                                    )
+        with torch.autocast(device_type="cuda"):
+            batch_encoding=self.tokenizer(prompts, **_tokenizer_call_kwargs)            
+            batch_encoding = batch_encoding.to(self.model.device)
+            input_tokens_len=batch_encoding['input_ids'].shape[-1]
+            
+            if self._config.enable_sdpa: 
+                with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
+                    generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
+            else:
+                generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
+            
+            filtered_tokens=[row[input_tokens_len:] for row in generated_tokens]
+            decoded_outputs=self.tokenizer.batch_decode(filtered_tokens, 
+                                                        skip_special_tokens=True
+                                                        )
         return decoded_outputs
 
-    def generate(self, prompts:str | list[str]) -> list[str]: 
+    def generate(self, prompts:str | list[str], batch_size:Optional[int]=2) -> list[str]: 
         """Generate response text from prompts.
 
         Parameters
@@ -223,7 +250,7 @@ class HuggingFaceGenerator:
         """
         prompts=[prompts] if isinstance(prompts, str) else prompts
         responses = []
-        for batch in batch_data(prompts, self._config.batch_size):
+        for batch in batch_data(prompts, batch_size):
             responses.extend(self._generate_batch(batch))
         return responses
 

@@ -95,7 +95,7 @@ class Strategy(object):
         return f'New strategy prompt is:\n{self.strategy}'
 
 class LactChain(nn.Module):
-
+    
     MODEL_MAP:dict[str, str]={
         'meta-llama/Meta-Llama-3-8B-Instruct': 'llama-3', 
         'meta-llama/Meta-Llama-3-8B':'llama-3',
@@ -144,13 +144,12 @@ class LactChain(nn.Module):
 
         self.generator=generator
         
-    @classmethod
-    def load_from_checkpoint(cls, checkpoint:str, config:ActorConfig, lora_config:LoraConfigSettings): 
-        actor=cls(checkpoint, config, lora_config)
-        return actor
-    
-    def save_model(self, save_path:str): 
-        self.save_pretrained(save_path, from_pt=True) 
+    @property
+    def outputs(self): 
+        '''
+        Property that returns the list of outputs output by a language model as a str
+        '''
+        return self._outputs
 
     def compile_prompts(self, state:str | list[str], info:str | list[str]) -> str | list[str]:
         '''Returns the whole prompt as a str. You can pass in a list of states and infos to get 
@@ -163,15 +162,11 @@ class LactChain(nn.Module):
             return strategies
         else: 
             return self._strategy(state, info)
-
-    def parse_outputs(self, outputs:list[str]) -> list[str]:
-        try:
-            return [json.loads(output) for output in outputs]
-        except Exception as e:
-            return dedent(f'''Your output string is not correctly formatted for {pp.pformat(outputs)}.
-                            Here is the error{e}''')
             
     def map_actions(self, batch_actions:list[str]) -> Tuple[list[np.ndarray], list[int]]: 
+        '''Helper function that maps list of processed outputs from llm into binary actions 
+        as a list of arrays
+        '''
         map={
             'move forward':0, 
             'turn left':1
@@ -190,42 +185,20 @@ class LactChain(nn.Module):
         return batch_mapped_actions, drop_indices
 
     def batch_parse_outputs(self, outputs:list[str]) -> list[str]:
+        '''Loops through the list of outputs and json parses them to return a list of 
+        processed strings
+        '''
         parsed_outputs=[]
-        for i, output in enumerate(outputs):
-            # try:
+        for _, output in enumerate(outputs):
             parsed_outputs.append(json.loads(output))
-            # except Exception as e:
-            #     print(f'PARSING ERROR FOR ELEMENT {i} IN BATCH...SKIPPING')
-            #     pass
+            
         return parsed_outputs
 
-    @torch.no_grad()
-    def sample_action(self,
-                      states:Dict[str, Any],
-                      infos:str
-                    ) -> Tuple[list[str], str]:
-        strategies=[]
-        states=[states] if isinstance(states, dict) else states
-        infos=[infos] if isinstance(infos, str) else infos
-        for (state, info) in zip(states, infos):
-            strategy=self._strategy(state, info)
-            strategies.append(strategy)
-
-        outputs=self.generator.generate(strategies)
-        parsed_outputs=self.parse_outputs(outputs)
-        
-        batch_actions, num_actions_dropped=self.map_actions(parsed_outputs)
-
-        print(outputs)
-        action=parsed_outputs[0]['moves'] # 0 since we are assuming list of actions is just [action]
-        context=parsed_outputs[0]['explain']
-        return action, context
-
-    @torch.no_grad()
+    @torch.inference_mode()
     def sample_actions(self,
-                      states:Dict[str, Any],
-                      infos:str
-                    ) -> Tuple[list[str], str]:
+                       states:Dict[str, Any],
+                       infos:str
+                       ) -> Tuple[list[str], str]:
         '''Samples batches of actions as List[array(int={0, 1})] where list is the batch, 
         array is the compound actions'''
         strategies=[]
@@ -234,17 +207,18 @@ class LactChain(nn.Module):
         for (state, info) in zip(states, infos):
             strategy=self._strategy(state, info)
             strategies.append(strategy)
-        outputs=self.generator.generate(strategies)
+        
+        batch_size=len(strategies) # optional batch size 
+        
+        outputs=self.generator.generate(strategies, batch_size)
         self._outputs=outputs
         parsed_outputs=self.batch_parse_outputs(outputs)
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
         mapped_actions, num_actions_dropped=self.map_actions(actions)
+        
         return mapped_actions, actions, contexts, num_actions_dropped
     
-    @property
-    def outputs(self): 
-        return self._outputs
     
         
 

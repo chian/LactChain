@@ -57,12 +57,16 @@ class ValueFunctionConfig(BaseConfig):
         description='Whether to compile the model for faster inference.',
     )
     enable_flash_attention:bool=Field(
-        False, 
+        True, 
         description='Whether to enable flash attention on model or not'
     )
     device_map_auto:bool=Field(
         False, 
         description='Whether to enable auto device map'
+    )
+    float16:bool=Field(
+        True, 
+        description='What dtype to have for the model: if flash attention, then float16 or bfloat16'
     )
 
 class ValueFunction(nn.Module): 
@@ -79,10 +83,20 @@ class ValueFunction(nn.Module):
             'return_tensors':'pt',
             'padding':'longest'
         }
+        self.tokenizer_decode_kwargs={
+            'skip_special_tokens':True
+        }
         model_kwargs={}
+        
+        default_dtype=torch.float32
         
         if config.device_map_auto: 
             model_kwargs['device_map'] = 'auto'
+            
+        if config.float16:
+            default_dtype=torch.float16 
+        
+        model_kwargs['torch_dtype']=default_dtype
         
         if config.quantization: 
             from transformers import BitsAndBytesConfig
@@ -98,7 +112,7 @@ class ValueFunction(nn.Module):
         if config.enable_flash_attention: 
             model_kwargs['attn_implementation'] = "flash_attention_2"
             
-        model=AutoModel.from_pretrained(model_name, torch_dtype=torch.float32,**model_kwargs)
+        model=AutoModel.from_pretrained(model_name, **model_kwargs)
         
         if config.use_lora: 
             lora_config=LoraConfig(**config.lora_config_settings.model_dump())
@@ -126,7 +140,8 @@ class ValueFunction(nn.Module):
         # fix properties 
         self.tokenizer=tokenizer
         self.model=model
-        self.q_value_head=nn.Linear(model.config.hidden_size, 1)
+        self.model_dtype = next(model.parameters()).dtype
+        self.q_value_head=nn.Linear(model.config.hidden_size, 1, dtype=default_dtype)
         self._total_params=sum(
             [p.numel() for p in self.model.parameters() if p.requires_grad] + 
             [p.numel() for p in self.q_value_head.parameters() if p.requires_grad]
@@ -156,24 +171,17 @@ class ValueFunction(nn.Module):
         inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
         
         return inputs
+    
+    def decode_tokens(self,
+                      inputs:Dict[str, Tensor]
+                      ) -> list[str]:
+        '''Function that compiles the states + infos info one list, then tokenizes it'''
+        
+        input_ids=inputs['input_ids']
+        decoded_strings=self.tokenizer.batch_decode(input_ids, **self.tokenizer_decode_kwargs)
+        
+        return decoded_strings
 
-    # def forward(self, 
-    #             states:Dict[str, Any] | list[Dict[str, Any]], 
-    #             infos:Dict[str, Any] | list[Dict[str, Any]]
-    #             ) -> Tensor: 
-        
-    #     # states=[states] if isinstance(states, dict) else states
-    #     # infos=[infos] if isinstance(infos, dict) else infos
-    #     # states=[str(state) for state in states]
-    #     # infos=[str(info['info']) for info in infos]
-        
-    #     # states=[states+'\n'+info for states, info in zip(states, infos)]
-    #     # inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
-    #     outputs = self.model(**inputs)
-    #     last_hidden_states = outputs.last_hidden_state
-    #     q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
-    #     pred_q_values = q_values.mean(dim=-1)  # Take the mean of the first logit
-    #     return pred_q_values # shape B x 1
     
     def forward(self, 
                 **inputs:Dict[str, Any]
@@ -186,10 +194,12 @@ class ValueFunction(nn.Module):
         
         # states=[states+'\n'+info for states, info in zip(states, infos)]
         # inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
-        outputs = self.model(**inputs)
-        last_hidden_states = outputs.last_hidden_state
-        q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
-        pred_q_values = q_values.mean(dim=-1)  # Take the mean of the first logit
+        with torch.autocast(device_type="cuda"):         
+            outputs = self.model(**inputs)
+            last_hidden_states = outputs.last_hidden_state
+            q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
+            pred_q_values = q_values.mean(dim=-1)  # Take the mean of the first logit
+        
         return pred_q_values # shape B x 1
 
 

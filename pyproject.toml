@@ -41,7 +41,8 @@ dependencies = [
     "gymnasium==0.29.1", 
     "pydantic==2.7.2", 
     "sentencepiece==0.2.0", 
-    "flash-attn==2.5.9.post1"
+    "flash-attn==2.5.9.post1", 
+    "optimum==1.21.2"
 ]
 
 

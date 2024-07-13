@@ -19,7 +19,7 @@ from lactchain.models.critic import ValueFunctionConfig
 from lactchain.models.actor import ActorConfig, LoraConfigSettings
 from lactchain.environments.grid_world import make_env, process_environment_outputs
 from lactchain.configs.base_config import BaseConfig
-from lactchain.utils import configure_logger
+from lactchain.utils import configure_logger, add_inputs_to_dict, unfold_list_of_lists
 
 PathLike=Union[str, Path]
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -30,6 +30,9 @@ ACTOR_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mi
 ACTOR_MODEL_TYPE='llama-3'
 
 CRITIC_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'
+
+torch.set_float32_matmul_precision('medium')
+torch.backends.cuda.matmul.allow_tf32 
 
 class FabricDeviceConfig(BaseConfig): 
     '''Base Config for running fabric accelerator'''
@@ -164,20 +167,6 @@ def argparse():
     )
     return parser.parse_args()
 
-def unfold_list_of_lists(list_of_list:list[list[Any]]) -> list: 
-    '''Unfolds a list of lists into a single large list that preserves order'''
-    unfolded_list=[item for sublist in list_of_list for item in sublist]
-    return unfolded_list
-
-def add_inputs_to_dict(batched_inputs:Dict[str, Tensor], inputs:Dict[str, Tensor]) -> Dict[str, Tensor]: 
-    '''Helper function that adds the tensors inputs dictionaries from tokenizer along 0-th dimension'''
-    for key in inputs:
-        if key in batched_inputs:
-            # Concatenate tensors along dim=0 --> [B*n, T]
-            batched_inputs[key] = torch.cat((batched_inputs[key], inputs[key]), dim=0)
-        else:
-            batched_inputs[key] = inputs[key]
-    return batched_inputs
 
 def train(
     fabric: Fabric,
@@ -258,23 +247,14 @@ def main():
     
     vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(args.collection_batch_size)])
     
-    agent=LightningA2C(args.actor_path, args.actor_model_type,
-                       actor_config, lora_config, 
+    agent=LightningA2C(args.actor_path, args.actor_model_type, actor_config, lora_config, 
                        args.critic_path, critic_config, 
                        args.gamma)
-    logger.info(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
+    
+    logger.debug(f'STARTING TRAINING WITH THIS PROMPT TEMPLATE:\n{agent.final_prompt_template} FOR ACTOR MODEL:\n{agent.actor_model} AND CRITIC MODEL:\n{agent.critic}\n MODEL_PATH:{args.actor_path}')
+    logger.debug(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
     optimizer = agent.configure_optimizers(args.learning_rate)
     
-    # Potentially load in the weights and states from a previous save
-    # if args.resume_from_checkpoint:
-    #     if args.resume_from_checkpoint != "latest":
-    #         path = os.path.basename(args.resume_from_checkpoint)
-    #     else:
-    #         # Get the most recent checkpoint
-    #         dirs = os.listdir(args.output_dir)
-    #         dirs = [d for d in dirs if d.startswith("critic_checkpoint")]
-    #         dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-    #         path = dirs[-1] if len(dirs) > 0 else None
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
@@ -299,6 +279,7 @@ def main():
     
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     agent, optimizer = fabric.setup(agent, optimizer)
+    agent.mark_forward_method('sample_actions') # check: register sample actions as a forward method 
     
     progress_bar = tqdm(
         range(0, num_collection_steps),
@@ -307,8 +288,6 @@ def main():
         disable=not fabric.is_global_zero, 
         file=open(os.devnull, 'w')
     )
-    
-    logger.info(f'STARTING TRAINING WITH THIS PROMPT TEMPLATE:\n{agent.final_prompt_template} FOR ACTOR MODEL:\n{agent.actor} AND CRITIC MODEL:\n{agent.critic}')
     
     for episode in range(args.num_episodes):
         
@@ -347,7 +326,7 @@ def main():
                             batched_inputs=add_inputs_to_dict(batched_inputs, inputs)
                         
                         obs = next_obs
-                        logger.info(f'''Successfully parsed {args.collection_batch_size-len(drop_indices)} actions out of batch size {args.collection_batch_size} in step {step}, adding to replay buffer for rank {global_rank}...''')
+                        logger.debug(f'''Successfully parsed {args.collection_batch_size-len(drop_indices)} actions out of batch size {args.collection_batch_size} in step {step}, adding to replay buffer for rank {global_rank}...''')
                         steps_kept+=1
                     except Exception as e: 
                         logger.error(f'''Error when collecting experience from rank {global_rank}:\n{e}\nDropping Full Batch for Step {step}...''')
@@ -388,17 +367,10 @@ def main():
         logger.debug(f'ATTENTION_MASK SHAPE: {gathered_data["batched_inputs"]["attention_mask"].shape}')
         
         fabric.log_dict({'TOTAL REWARD FOR ALL RANKS':torch.sum(rewards)})
+        logger.info(f'{'TOTAL REWARD FOR ALL RANKS':torch.sum(rewards)}') if global_rank==0 else None
         
         train(fabric, agent, optimizer, lr_scheduler, gathered_data, args, logger)  
         
-        # saving the model 
-        # if episode % args.checkpointing_steps == 0:
-        #     if fabric.global_rank==0:
-        #         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
-        #         if args.checkpoints_total_limit is not None:
-        #             checkpoints = os.listdir(args.output_dir)
-        #             checkpoints = [d for d in checkpoints if d.startswith("critic_checkpoint")]
-        #             checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
         if episode % args.checkpointing_steps == 0:
             if fabric.global_rank == 0:
                 if args.checkpoints_total_limit is not None:

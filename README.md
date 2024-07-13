@@ -38,7 +38,7 @@ cd latchain/train
 qsub first_run_all_gpus.pbs
 
 # If you are running from pretrained checkpoint
-qsub 
+qsub ckpt_run_all_gpus.pbs
 ```
 
 ## Current Components: 

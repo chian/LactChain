@@ -25,7 +25,8 @@ cd $PBS_O_WORKDIR
 
 ## Running actual script
 fabric run critic_train_lightning.py \
-    --actor_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--meta-llama--Meta-Llama-3-8B-Instruct/snapshots/e1945c40cd546c78e41f1151f4db032b271faeaa'\
+    --actor_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mixtral-8x7B-Instruct-v0.1'\
+	--actor_model_type 'mistral-7b' \
     --critic_path '/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'\
     --logging_level 'info' \
     --logging_save_path 'logging.log' \
@@ -40,5 +41,5 @@ fabric run critic_train_lightning.py \
     --checkpoints_total_limit 10 \
     --checkpointing_steps 10 \
     --output_dir 'actor-finetuned-critic'\
-    --devices 2 \
+    --devices 4 \
     --accelerator cuda

@@ -1,29 +1,21 @@
 from textwrap import dedent
 from typing import Any, List, Dict, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
-from langchain.output_parsers import PydanticOutputParser
 import torch
 import numpy as np
 import torch.nn as nn, torch.nn.functional as F
-import pprint as pp
-import json
 import lightning as pl
 from torch import Tensor
-from lactchain.models.actor import (ActorConfig, LactChain, 
-                                    STRATEGY, PROMPT_TEMPLATE, 
-                                    Strategy, ListOfMoves, 
-                                    LoraConfigSettings)
+from lactchain.models.actor import (ActorConfig, LactChain, LoraConfigSettings)
 
 from lactchain.models.critic import (ValueFunctionConfig, ValueFunction)
 from lactchain.configs.base_config import BaseConfig
-from lactchain.models.backends.langchain_backend import LangChainGenerator, GeneratorConfig
-from lactchain.models.backends.vllm_backend import VLLMGeneratorConfig, VLLMGenerator
 from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator, 
                                                            HuggingFaceGeneratorConfig, 
                                                            LoraConfigSettings)
 
 class LightningA2C(pl.LightningModule): 
-    
+    '''Lightning Class that contains Critic and Actor Models for Lactchain style inference'''
     MODEL_MAP:dict[str, str]={
         'meta-llama/Meta-Llama-3-8B-Instruct': 'llama-3', 
         'meta-llama/Meta-Llama-3-8B':'llama-3',
@@ -68,12 +60,21 @@ class LightningA2C(pl.LightningModule):
         self._model_trainable_params=dedent(f'''Total number of parameters: {self._total_params:,}\nTotal number of trainable parameters: {self._total_trainable_params:,}\nPercentage of parameters trained: {(self._total_trainable_params/self._total_params) * 100}%''')
         self._final_prompt_template=self.actor.compile_prompts('<STATE_GOES_HERE>', '<INFO_GOES_HERE>')
         
+        self._actor_model=self.actor.generator.model # returns the type of actor model 
+        
+    @property
+    def actor_model(self): 
+        '''Returns the model structure of actor model'''
+        return self._actor_model
+    
     @property
     def model_trainable_params(self): 
+        '''Returns total number of parameters of model'''
         return self._model_trainable_params
     
     @property
     def final_prompt_template(self):
+        '''Return the final prompt template'''
         return self._final_prompt_template
     
     @torch.inference_mode()
@@ -83,6 +84,12 @@ class LightningA2C(pl.LightningModule):
                              ) -> Tensor: 
         '''compile and tokenize the strings'''
         return self.critic.compile_and_tokenize(states, infos)
+    
+    def decode(self, 
+               inputs:Dict[str, Tensor]
+               ) -> list[str]: 
+        '''De-tokenize and return the original strings'''
+        return self.critic.decode_tokens(inputs)
         
     @torch.inference_mode()
     def sample_actions(self,
@@ -138,7 +145,6 @@ class LightningA2C(pl.LightningModule):
     def forward(self, **inputs:Dict[str, Any]) -> Tensor: 
         return self.calculate_value(**inputs)
     
-        
     def training_step(self, 
                       rewards:Tensor, 
                       inputs:Dict[str, Tensor]

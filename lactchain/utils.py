@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 import pkg_resources
 import os, logging
 from argparse import ArgumentParser
 import torch
+from torch import Tensor
 
 from lactchain.models.lightning_agent import LightningA2C
 
@@ -42,6 +43,29 @@ def unfold_list_of_lists(list_of_list:list[list[Any]]) -> list:
     '''Unfolds a list of lists into a single large list that preserves order'''
     unfolded_list=[item for sublist in list_of_list for item in sublist]
     return unfolded_list
+
+def add_inputs_to_dict(batched_inputs:Dict[str, Tensor], inputs:Dict[str, Tensor]) -> Dict[str, Tensor]: 
+    '''Helper function that adds the tensors inputs dictionaries from tokenizer along 0-th dimension'''
+    for key in inputs:
+        if key in batched_inputs:
+            # Concatenate tensors along dim=0 --> [B*n, T]
+            batched_inputs[key] = torch.cat((batched_inputs[key], inputs[key]), dim=0)
+        else:
+            batched_inputs[key] = inputs[key]
+    return batched_inputs
+
+def join_inputs(inputs_1:Dict[str, Tensor], inputs_2:Dict[str, Tensor], join_dim:int=1) -> Dict[str, Tensor]: 
+    '''Helper function that joines the tensors inputs dictionaries from tokenizer along 1-st dimension'''
+    for key in inputs_2:
+        if key in inputs_1:
+            # Concatenate inputs and make a new dimension for dict --> [B, new_dim, T, D]
+            inputs_1[key] = torch.cat(
+                (inputs_1[key].unsqueeze(join_dim), inputs_2[key].unsqueeze(join_dim)), 
+                dim=join_dim
+                )
+        else:
+            inputs_1[key] = inputs_2[key]
+    return inputs_1
 
 # LEGACY / BACKUP UTILS
 def save_only_trainable_weights(lightning_model:LightningA2C, path:str):

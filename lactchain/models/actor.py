@@ -142,6 +142,9 @@ class LactChain(nn.Module):
             else:
                 generator=_generator(config.huggingfaceconfig)
 
+        for param in self.parameters():
+            param.requires_grad = False
+
         self.generator=generator
         
     @property

@@ -7,7 +7,7 @@ import torch.nn as nn, torch.nn.functional as F
 import lightning as pl
 from torch import Tensor
 from lactchain.models.actor import (ActorConfig, LactChain, LoraConfigSettings)
-
+from peft import PeftModel
 from lactchain.models.critic import (ValueFunctionConfig, ValueFunction)
 from lactchain.configs.base_config import BaseConfig
 from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator, 
@@ -78,6 +78,16 @@ class LightningA2C(pl.LightningModule):
         return self._final_prompt_template
     
     @torch.inference_mode()
+    def sample_actions(self,
+                       states:Dict[str, Any],
+                       infos:str
+                       ) -> Tuple[list[np.ndarray], list[str], list[str], list[int]]:
+        '''Actor samples actions'''
+        batch_mapped_actions, actions, contexts, drop_indices = self.actor.sample_actions(states, infos)
+    
+        return batch_mapped_actions, actions, contexts, drop_indices
+    
+    @torch.inference_mode()
     def compile_and_tokenize(self, 
                              states:Dict[str, Any] | list[Dict[str, Any]], 
                              infos:Dict[str, Any] | list[Dict[str, Any]]
@@ -90,16 +100,6 @@ class LightningA2C(pl.LightningModule):
                ) -> list[str]: 
         '''De-tokenize and return the original strings'''
         return self.critic.decode_tokens(inputs)
-        
-    @torch.inference_mode()
-    def sample_actions(self,
-                       states:Dict[str, Any],
-                       infos:str
-                       ) -> Tuple[list[np.ndarray], list[str], list[str], list[int]]:
-        '''Actor samples actions'''
-        batch_mapped_actions, actions, contexts, drop_indices = self.actor.sample_actions(states, infos)
-    
-        return batch_mapped_actions, actions, contexts, drop_indices
 
     def _calc_returns_list(self, rewards:List[int]) -> List[np.ndarray]:
         '''Takes a list of returns in trajectory and computes the return R_t for t in trajectory
@@ -142,6 +142,25 @@ class LightningA2C(pl.LightningModule):
         pred_q_values = self.critic(**inputs)
         return pred_q_values
     
+    @torch.inference_mode()
+    def calculate_advantages(self, 
+                             rewards:Tensor | np.ndarray, 
+                             inputs:Dict[str, Tensor]
+                             ) -> Tensor: 
+        '''
+        Calculates Advantages Tensor Given a Tensor of Rewards shape [B] and inputs [B, T]
+        '''
+        if isinstance(rewards, np.ndarray): 
+            rewards=torch.from_numpy(rewards)
+            
+        rewards=rewards.to(self.device)  
+        inputs=inputs.to(self.device)
+        values=self(**inputs)
+        cumulative_returns=self.calculate_returns(rewards).to(values.device)
+        advantages=(values-cumulative_returns)
+        
+        return advantages
+    
     def forward(self, **inputs:Dict[str, Any]) -> Tensor: 
         return self.calculate_value(**inputs)
     
@@ -166,43 +185,34 @@ class LightningA2C(pl.LightningModule):
             loss of shape B
         '''
         values=self(**inputs)
-        cumulative_returns = self.calculate_returns(rewards).to(values.device)
-        critic_loss = F.smooth_l1_loss(cumulative_returns, values)
+        cumulative_returns=self.calculate_returns(rewards).to(values.device)
+        critic_loss=F.smooth_l1_loss(cumulative_returns, values)
 
         return critic_loss
-    
-    @torch.inference_mode()
-    def calculate_advantages(self, 
-                             rewards:Tensor | np.ndarray, 
-                             inputs:Dict[str, Tensor]
-                             ) -> Tensor: 
-        '''
-        Calculates Advantages Tensor Given a Tensor of Rewards shape [B] and inputs [B, T]
-        '''
-        if isinstance(rewards, np.ndarray): 
-            rewards=torch.from_numpy(rewards)
-            
-        rewards=rewards.to(self.device)  
-        inputs=inputs.to(self.device)
-        values=self(**inputs)
-        cumulative_returns=self.calculate_returns(rewards).to(values.device)
-        advantages=(values-cumulative_returns)
-        
-        return advantages
     
     def configure_optimizers(self, lr: float):
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
     
-    # def state_dict(self):
-    #     '''Overriding state dict to save only lora + q-value head'''
-    #     state = super().state_dict()
-    #     for name in list(state.keys()):
-    #         if "lora" not in name and "q_value_head" not in name:  # <-- adapt the condition to your use case
-    #             state.pop(name)
-    #     return state
+    # def save(self, save_path:str):
+    #     self.peft_model.save_pretrained(save_path)
+    #     torch.save(self.linear.state_dict(), f"{save_path}/linear_layer.pth")
+
+    # def load(self, load_path:str):
+    #     self.peft_model = PeftModel.from_pretrained(self.base_model, load_path)
+    #     self.linear.load_state_dict(torch.load(f"{load_path}/linear_layer.pth"))
+
     
-    # def load_state_dict(self, state_dict, strict=True):
-    #     # Create a new state dict with only matching keys for LoRA and q_value_head
-    #     lora_and_q_value_head_state = {k: v for k, v in state_dict.items() if "lora" in k or "q_value_head" in k}
-    #     super().load_state_dict(lora_and_q_value_head_state, strict=strict)
+    def state_dict(self, *args, **kwargs):
+        '''Overriding state dict to save only lora + q-value head'''
+        state = super().state_dict(*args, **kwargs)
+        for name in list(state.keys()):
+            if "lora" not in name and "q_value_head" not in name:  # <-- adapt the condition to your use case
+                state.pop(name)
+        return state
+    
+    def load_state_dict(self, state_dict:Dict[str, Any], strict=True, *args, **kwargs):
+        '''Overriding super class for loading in model state dicts for Lora and Q value Linear Head'''
+        # Create a new state dict with only matching keys for LoRA and q_value_head
+        lora_and_q_value_head_state = {k: v for k, v in state_dict.items() if "lora" in k or "q_value_head" in k}
+        super().load_state_dict(lora_and_q_value_head_state, strict=strict, *args, **kwargs)
 

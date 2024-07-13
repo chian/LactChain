@@ -1,11 +1,11 @@
 from peft import get_peft_model, LoraConfig, get_peft_config
-from transformers import TrainingArguments, Trainer, AutoModel, AutoTokenizer, PreTrainedTokenizer
+from transformers import AutoModel, AutoTokenizer, PreTrainedTokenizer
 import torch
 from torch import Tensor, nn, functional as F
 from textwrap import dedent
 from pydantic import Field
 from typing import Any, Union, Dict, Tuple, List, Optional, Literal
-from peft import LoraModel, LoraConfig, PeftModel
+from peft import LoraModel, LoraConfig, PeftModel, get_peft_model
 from transformers import BitsAndBytesConfig
 from torch import Tensor
 import lightning as pl
@@ -17,7 +17,7 @@ class LoraConfigSettings(BaseConfig):
     target_modules:List[str]=Field(["q_proj", "v_proj", "k_proj", "o_proj"])
     lora_dropout:float=Field(0.05)
     bias:str=Field('all')
-    task_type:str=Field("SEQ_CLS")
+    task_type:str=Field("FEATURE_EXTRACTION")
 
 class ValueFunctionConfig(BaseConfig): 
     use_lora:bool=Field(
@@ -49,7 +49,7 @@ class ValueFunctionConfig(BaseConfig):
         description='Whether to use quantization.',
     )
     half_precision: bool = Field(
-        False,
+        True,
         description='Whether to use half precision.',
     )
     compile_model: bool = Field(
@@ -68,6 +68,11 @@ class ValueFunctionConfig(BaseConfig):
         True, 
         description='What dtype to have for the model: if flash attention, then float16 or bfloat16'
     )
+    enable_sdpa:bool=Field(
+        True, 
+        description="Whether to enable sdpa attnetion or not via torch context manager"
+    )
+    
 
 class ValueFunction(nn.Module): 
     '''Config is type ValueFunctionConfig class and will dump sub-configs or attr into the model'''
@@ -116,7 +121,8 @@ class ValueFunction(nn.Module):
         
         if config.use_lora: 
             lora_config=LoraConfig(**config.lora_config_settings.model_dump())
-            model=LoraModel(model, lora_config, "default")
+            # model=LoraModel(model, lora_config, "default")
+            model=get_peft_model(model, lora_config, adapter_name='default')
         
         if config.load_from_checkpoint: 
             model = PeftModel.from_pretrained(model, config.load_from_checkpoint)
@@ -156,6 +162,7 @@ class ValueFunction(nn.Module):
         critic=cls(checkpoint, config)
         return critic
     
+    @torch.inference_mode()
     def compile_and_tokenize(self,
                              states:Dict[str, Any] | list[Dict[str, Any]], 
                              infos:Dict[str, Any] | list[Dict[str, Any]]
@@ -172,6 +179,7 @@ class ValueFunction(nn.Module):
         
         return inputs
     
+    @torch.inference_mode()
     def decode_tokens(self,
                       inputs:Dict[str, Tensor]
                       ) -> list[str]:
@@ -182,20 +190,18 @@ class ValueFunction(nn.Module):
         
         return decoded_strings
 
-    
     def forward(self, 
                 **inputs:Dict[str, Any]
                 ) -> Tensor: 
         
-        # states=[states] if isinstance(states, dict) else states
-        # infos=[infos] if isinstance(infos, dict) else infos
-        # states=[str(state) for state in states]
-        # infos=[str(info['info']) for info in infos]
-        
-        # states=[states+'\n'+info for states, info in zip(states, infos)]
-        # inputs = self.tokenizer(states, **self.tokenizer_call_kwargs).to(self.model.device)
-        with torch.autocast(device_type="cuda"):         
-            outputs = self.model(**inputs)
+        with torch.autocast(device_type="cuda"): 
+            
+            if self.config.enable_sdpa: 
+                with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):     
+                    outputs = self.model(**inputs)
+            else: 
+                outputs = self.model(**inputs)
+            
             last_hidden_states = outputs.last_hidden_state
             q_values = self.q_value_head(last_hidden_states[:, 0, :])  # Using the first token's representation
             pred_q_values = q_values.mean(dim=-1)  # Take the mean of the first logit

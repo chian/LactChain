@@ -8,7 +8,7 @@ from lightning import Fabric
 from lightning.fabric.utilities import AttributeDict
 from wandb.integration.lightning.fabric import WandbLogger
 import pprint as pp
-import os, shutil, math, logging, re
+import os, shutil, math, logging, re, sys
 from argparse import ArgumentParser
 from pydantic import Field
 from tqdm import tqdm
@@ -88,9 +88,9 @@ def argparse():
         help='The file to save the logging file to'
     )
     parser.add_argument(
-        "--log_wandb",
+        "--log_wandb_offline",
         type=bool,
-        default=False,
+        default=True,
         help="Whether or not to use fabric.setup or not for the dataloader",
     )
     parser.add_argument(
@@ -181,7 +181,7 @@ def train(
     inputs=data['batched_inputs']
     
     indices=list(range(rewards.shape[0]))
-    logger.info(f'REWARDS:{rewards}\nREWARDS SHAPE: {rewards.shape}\nTOTAL INDICES: {indices}\nLENGTH OF INDICES: {len(indices)}\n')
+    logger.debug(f'REWARDS:{rewards}\nREWARDS SHAPE: {rewards.shape}\nTOTAL INDICES: {indices}\nLENGTH OF INDICES: {len(indices)}\n')
     
     sampler = DistributedSampler(
         indices, num_replicas=fabric.world_size, rank=fabric.global_rank, shuffle=True
@@ -189,11 +189,16 @@ def train(
     sampler = BatchSampler(sampler, batch_size=args.train_batch_size, drop_last=False)
 
     with torch.autograd.set_detect_anomaly(True):
-        for epoch in range(args.num_epochs):
+        for epoch in tqdm(range(args.num_epochs), 
+                          leave=False,
+                          desc=f'EXPERIENCE TRAINING', 
+                          file=sys.stdout
+                        #   disable=not fabric.is_global_zero
+                          ):
             epoch_loss=0
             sampler.sampler.set_epoch(epoch)
             for batch_indices in sampler:
-                logger.info(f'''Batch_Indices for rank {fabric.global_rank}: {batch_indices}''')
+                logger.debug(f'''Batch_Indices for rank {fabric.global_rank}: {batch_indices}''')
                 fabric.barrier()
                 optimizer.zero_grad()
                 selected_rewards=rewards[batch_indices] # shape [B, T]
@@ -212,13 +217,13 @@ def train(
                 optimizer.step()
                 
             fabric.log_dict({"Epoch loss": epoch_loss})
-            logger.info(f'Epoch Loss: {epoch_loss}')
+            logger.info(f'Epoch Loss: {epoch_loss}\n') if fabric.global_rank == 0 else None
             lr_scheduler.step()
 
 def main():
     args=argparse()
-    logger = configure_logger(args.logging_level, args.logging_save_path)
-    wandb_logger=WandbLogger(project="Lactchain-Critic-Tuning", offline=args.log_wandb)
+    
+    wandb_logger=WandbLogger(project="Lactchain-Critic-Tuning", offline=args.log_wandb_offline)
     # Initialize Fabric
     fabric = Fabric(loggers=wandb_logger)
     # device settings
@@ -227,9 +232,12 @@ def main():
     device = fabric.device
     local_rank=fabric.local_rank # rank on local node 
     
-    global_buffer_size=args.global_buffer_size
-    local_buffer_size=int(global_buffer_size // world_size)
-    num_collection_steps=math.floor(local_buffer_size / args.collection_batch_size)
+    logger = configure_logger(args.logging_level, args.logging_save_path, global_rank)
+    
+    global_buffer_size=args.global_buffer_size # max buffer size across ranks
+    local_buffer_size=math.ceil(global_buffer_size / world_size) # per rank buffer size 
+    local_quarter_buffer_size=math.ceil(local_buffer_size / 4) # size for quarter of local buffer size for tracking
+    num_collection_steps=math.ceil(local_buffer_size / args.collection_batch_size) # num_collection_steps per rank
     
     logging.info(f'''LOGGING WITH THE FOLLOWING:\n\
                  GLOBAL BUFFER SIZE: {global_buffer_size}\
@@ -239,7 +247,7 @@ def main():
                  \nTRAIN BATCH SIZE PER RANK: {args.train_batch_size}\
                  \nNUM EPOCHS: {args.num_epochs}\
                  \nNUM EPISODES: {args.num_episodes}
-                 ''')
+                 ''') if global_rank==0 else None
     
     actor_config=ActorConfig()
     lora_config=LoraConfigSettings()
@@ -258,6 +266,7 @@ def main():
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
+
         else:
             dirs = os.listdir(args.output_dir)
             dirs = [d for d in dirs if d.startswith("critic_checkpoint") and d.endswith(".ckpt")]
@@ -265,18 +274,26 @@ def main():
             path = dirs[-1] if len(dirs) > 0 else None
                     
         if path is None:
-            fabric.print(
+            logger.info(
                 f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
-            )
+            ) if global_rank==0 else None
             args.resume_from_checkpoint = None
+
         else:
-            fabric.print(f"Resuming from checkpoint {path}")
-            full_checkpoint = fabric.load(os.path.join(args.output_dir, path))
+            logger.info(f"RESUMING FROM CHECKPOINT: {path}\n") if global_rank==0 else None
+            # critic_state_dict=agent.state_dict() # getting the model state dict 
+            # fabric.load(os.path.join(args.output_dir, path), critic_state_dict) # fill it wit da checkpoint yuh
+            
+            critic_state_dict=agent.state_dict()
+            state = AttributeDict(model1=critic_state_dict, optimizer=optimizer)
+            full_checkpoint=fabric.load(os.path.join(args.output_dir, path), state) # fill it wit da checkpoint yuh
+            assert bool(full_checkpoint)==False, f'WARNING: THERE WERE THINGS NOT LOADED PROPERLY FOR THE MODEL STATE'
             parsed_filename = re.search(r'critic_checkpoint-(\d+)\.ckpt', path)
             episode = int(parsed_filename.group(1))
-            agent.load_state_dict(full_checkpoint['model'])
-            optimizer.load_state_dict(full_checkpoint['optimizer'])
-    
+            breakpoint()
+            # agent.load_state_dict(full_checkpoint['model'])
+            # optimizer.load_state_dict(full_checkpoint['optimizer'])
+
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
     agent, optimizer = fabric.setup(agent, optimizer)
     agent.mark_forward_method('sample_actions') # check: register sample actions as a forward method 
@@ -284,14 +301,16 @@ def main():
     progress_bar = tqdm(
         range(0, num_collection_steps),
         initial=0,
-        desc=f"COLLECTING DATA FOR BUFFER OF SIZE {local_buffer_size}",
-        disable=not fabric.is_global_zero, 
-        file=open(os.devnull, 'w')
+        leave=False,
+        desc=f"COLLECTING DATA FOR LOCAL BUFFER OF SIZE {local_buffer_size} ON RANK {global_rank}",
+        # disable=not fabric.is_global_zero, 
+        # file=open(os.devnull, 'w')
+        file=sys.stdout
     )
     
     for episode in range(args.num_episodes):
         
-        fabric.barrier() # sync per episode
+        fabric.barrier(name='Episode Syncing') # sync per episode
         logger.info(f'Starting Episode {episode+1} on all ranks...') if global_rank==0 else None
         rewards=[]
         batched_inputs={}
@@ -303,15 +322,14 @@ def main():
         with torch.autograd.set_detect_anomaly(True):
             with torch.no_grad(): 
                 
-                logger.info(f'COLLECTING EXPERIENCE FOR RANK {global_rank}...\nESTIMATED NUMBER OF COLLECTION STEPS PER RANK: {num_collection_steps}')
+                logger.info(f'COLLECTING EXPERIENCE FOR RANK {global_rank}, ESTIMATED NUMBER OF COLLECTION STEPS PER RANK: {num_collection_steps}\n')
                 step=0
 
                 while buffer_size<local_buffer_size: 
                     step+=1
                     try: 
-                        batch_mapped_actions, actions, contexts, drop_indices=agent.sample_actions(obs, info)
-                        # TODO: if action is dropped, then send in default actions but do not collect 
-                        next_obs, reward, done, truncated, info = vector_env.step(batch_mapped_actions)
+                        batch_mapped_actions, _actions, _contexts, drop_indices=agent.sample_actions(obs, info)
+                        next_obs, reward, _done, _truncated, info = vector_env.step(batch_mapped_actions)
                         next_obs, info=process_environment_outputs(next_obs, info)
                         inputs=agent.compile_and_tokenize(next_obs, info)
 
@@ -326,25 +344,24 @@ def main():
                             batched_inputs=add_inputs_to_dict(batched_inputs, inputs)
                         
                         obs = next_obs
-                        logger.debug(f'''Successfully parsed {args.collection_batch_size-len(drop_indices)} actions out of batch size {args.collection_batch_size} in step {step}, adding to replay buffer for rank {global_rank}...''')
+                        logger.debug(f'''Successfully parsed {args.collection_batch_size-len(drop_indices)} actions out of batch size {args.collection_batch_size} in step {step}, adding to replay buffer for rank {global_rank}...\n''')
                         steps_kept+=1
                     except Exception as e: 
-                        logger.error(f'''Error when collecting experience from rank {global_rank}:\n{e}\nDropping Full Batch for Step {step}...''')
+                        logger.error(f'''Error when collecting experience from rank {global_rank}:\n{e}\nDropping Full Batch for Step {step}...\n''')
                         logger.debug(f'''PROPOSED OUTPUTS:\n{pp.pformat(agent.actor.outputs)}\n\n\n''')
                         continue
                     
-                    progress_bar.update(1)
-                    logger.info(str(progress_bar))
                     buffer_size = len(np.concatenate(rewards))
-                    logger.info(f'''RANK BUFFER SIZE: {buffer_size} AT STEP {step} FOR RANK {global_rank}''')  
+                    progress_bar.update(1)
+                    logger.debug(str(progress_bar)+'\n')
                     
-        logger.info(f'''FOR RANK {global_rank} TOTAL STEPS:{step} STEPS KEPT:{steps_kept} GATHERING DATA FROM RANK {global_rank}...''')        
-        fabric.barrier()
+        logger.info(f'''FOR RANK {global_rank} TOTAL STEPS:{step} STEPS KEPT:{steps_kept} GATHERING LOCAL BUFFER FROM RANK {global_rank}...\n''')        
+        fabric.barrier(name='All Gather Sync')
         
         # Truncate dataset in dim=0 if we oversample
         rewards=torch.from_numpy(np.stack(rewards)).flatten()
         if rewards.shape[0]>local_buffer_size: 
-            logger.info(f'RANK {local_rank} OVERSAMPLED OVER LOCAL BUFFER SIZE LIMIT, TRUNCATING DATASET...')
+            logger.info(f'RANK {local_rank} OVERSAMPLED LOCAL BUFFER SIZE LIMIT OF {local_buffer_size}, DROPPING {int(rewards.shape[0] - local_buffer_size)} SAMPLES...')
             rewards=rewards[:local_buffer_size]
             batched_inputs['input_ids']=batched_inputs['input_ids'][:local_buffer_size,:]
             batched_inputs['attention_mask']=batched_inputs['attention_mask'][:local_buffer_size,:]
@@ -367,7 +384,7 @@ def main():
         logger.debug(f'ATTENTION_MASK SHAPE: {gathered_data["batched_inputs"]["attention_mask"].shape}')
         
         fabric.log_dict({'TOTAL REWARD FOR ALL RANKS':torch.sum(rewards)})
-        logger.info(f'{'TOTAL REWARD FOR ALL RANKS':torch.sum(rewards)}') if global_rank==0 else None
+        logger.info(f'TOTAL REWARD FOR ALL RANKS:{torch.sum(rewards)}') if global_rank==0 else None
         
         train(fabric, agent, optimizer, lr_scheduler, gathered_data, args, logger)  
         
@@ -390,10 +407,14 @@ def main():
                             removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
                             shutil.rmtree(removing_checkpoint)
 
-                save_path = os.path.join(args.output_dir, f"critic_checkpoint-{episode}.ckpt")
-                state = AttributeDict(model1=agent, optimizer=optimizer)
-                fabric.save(save_path, state)
-                logger.info(f"SAVING MODEL TO: {save_path}")
+
+            # TODO: TRYING OUT SAVING ON ALL RANKS
+            save_path = os.path.join(args.output_dir, f"critic_checkpoint-{episode}.ckpt")
+            
+            critic_state_dict=agent.state_dict()
+            state = AttributeDict(model1=critic_state_dict, optimizer=optimizer)
+            fabric.save(save_path, state) # save must be called on all devices I think?
+            logger.info(f"SAVING MODEL TO: {save_path}")
     
 if __name__=="__main__": 
     

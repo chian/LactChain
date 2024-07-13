@@ -8,7 +8,10 @@ from torch import Tensor
 
 from lactchain.models.lightning_agent import LightningA2C
 
-def configure_logger(level:str='debug', logging_save_path:Optional[str]=None) -> logging.Logger: 
+def configure_logger(level:str='debug', 
+                     logging_save_path:Optional[str]=None, 
+                     rank:Optional[int]=None
+                     ) -> logging.Logger: 
     '''Function for creating a logger to write to file and terminal'''
     LEVELS={
         'debug':logging.DEBUG, 
@@ -17,14 +20,17 @@ def configure_logger(level:str='debug', logging_save_path:Optional[str]=None) ->
         'error':logging.ERROR, 
         'critical':logging.CRITICAL
     }
-        
-    logger=logging.getLogger('Critic Training Logger')
+    if rank is not None: 
+        logger=logging.getLogger(f'Critic Train Rank {rank}')
+    else:
+        logger=logging.getLogger('Critic Train')
     logger.setLevel(LEVELS.get(level))
     ch = logging.StreamHandler()
     ch.setLevel(LEVELS.get(level))
     fh = logging.FileHandler(logging_save_path)
     fh.setLevel(LEVELS.get(level))
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(name)s:%(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     fh.setFormatter(formatter)
     logger.addHandler(ch)

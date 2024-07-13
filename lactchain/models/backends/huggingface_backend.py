@@ -4,7 +4,7 @@ import torch
 from typing import Union, TypeVar, Optional, Dict, Any, List
 from pathlib import Path
 from pydantic import Field
-from peft import LoraModel, LoraConfig
+from peft import LoraModel, LoraConfig, get_peft_model
 from lactchain.configs.base_config import BaseConfig
 
 PathLike = Union[str, Path]
@@ -110,6 +110,10 @@ class HuggingFaceGeneratorConfig(BaseConfig):
         False, 
         description='Whether to use an onnx model or not for potentially faster inference.'
     )
+    freeze_model:bool=Field(
+        True, 
+        description='Whether to freeze the model or not'
+    )
 
 
 class HuggingFaceGenerator:
@@ -128,6 +132,8 @@ class HuggingFaceGenerator:
         import torch
         from transformers import AutoTokenizer
         from transformers import AutoModelForCausalLM
+        from torch.nn.functional import scaled_dot_product_attention
+        from torch.nn.attention import SDPBackend, sdpa_kernel
 
         model_kwargs={}
 
@@ -170,6 +176,7 @@ class HuggingFaceGenerator:
         
         if lora_config: 
             lora_config=LoraConfig(**lora_config.model_dump())
+            # model=get_peft_model(model, lora_config, adapter_name='default')
             model=LoraModel(model, lora_config, adapter_name='default')
 
         # Set the model max length for proper truncation
@@ -197,6 +204,10 @@ class HuggingFaceGenerator:
             gradient_checkpointing_kwargs = {}
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
         
+        if config.freeze_model: 
+            for param in model.parameters():
+                param.requires_grad = False
+        
         # Set persistent attributes
         self.model_dtype = next(model.parameters()).dtype
         self.model = model
@@ -217,21 +228,22 @@ class HuggingFaceGenerator:
         _model_call_kwargs={'num_return_sequences':1, 'max_new_tokens':1000, 
                             'do_sample':True, 'temperature':0.1}
 
-        with torch.autocast(device_type="cuda"):
-            batch_encoding=self.tokenizer(prompts, **_tokenizer_call_kwargs)            
-            batch_encoding = batch_encoding.to(self.model.device)
-            input_tokens_len=batch_encoding['input_ids'].shape[-1]
-            
-            if self._config.enable_sdpa: 
-                with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
+        with torch.no_grad():
+            with torch.autocast(device_type="cuda"):
+                batch_encoding=self.tokenizer(prompts, **_tokenizer_call_kwargs)            
+                batch_encoding = batch_encoding.to(self.model.device)
+                input_tokens_len=batch_encoding['input_ids'].shape[-1]
+                
+                if self._config.enable_sdpa: 
+                    with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False):
+                        generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
+                else:
                     generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
-            else:
-                generated_tokens=self.model.generate(**batch_encoding, **_model_call_kwargs)
-            
-            filtered_tokens=[row[input_tokens_len:] for row in generated_tokens]
-            decoded_outputs=self.tokenizer.batch_decode(filtered_tokens, 
-                                                        skip_special_tokens=True
-                                                        )
+                
+                filtered_tokens=[row[input_tokens_len:] for row in generated_tokens]
+                decoded_outputs=self.tokenizer.batch_decode(filtered_tokens, 
+                                                            skip_special_tokens=True
+                                                            )
         return decoded_outputs
 
     def generate(self, prompts:str | list[str], batch_size:Optional[int]=2) -> list[str]: 

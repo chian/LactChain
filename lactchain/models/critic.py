@@ -136,6 +136,12 @@ class ValueFunction(nn.Module):
         # Convert the model to half precision
         if config.half_precision:
             model.half()
+        
+        # freeze non lora weights 
+        for name, param in model.named_parameters():
+            if "lora" not in name:
+                param.requires_grad = False
+            
         # tokenizer setup
         tokenizer=AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = min(model.config.max_position_embeddings, 

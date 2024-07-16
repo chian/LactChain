@@ -5,6 +5,7 @@ import os, logging
 from argparse import ArgumentParser
 import torch
 from torch import Tensor
+from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 
 from lactchain.models.lightning_agent import LightningA2C
 
@@ -72,6 +73,14 @@ def join_inputs(inputs_1:Dict[str, Tensor], inputs_2:Dict[str, Tensor], join_dim
         else:
             inputs_1[key] = inputs_2[key]
     return inputs_1
+
+# Function to filter out fake tensors in a tensor of shape (B, seq_len)
+def filter_fake_tensors(tensor:Tensor) -> Tensor:
+    '''Filters out the tensor for fake tensors and returns the filtered tensor'''
+    mask = torch.tensor(
+        [not isinstance(row, FakeTensor) for row in tensor]
+        )
+    return tensor[mask]
 
 # LEGACY / BACKUP UTILS
 def save_only_trainable_weights(lightning_model:LightningA2C, path:str):

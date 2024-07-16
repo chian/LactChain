@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 import torch
 import numpy as np
-import torch.nn as nn
 import pprint as pp
 import json
 import lightning as pl
@@ -94,7 +93,7 @@ class Strategy(object):
         self.strategy=new_strategy
         return f'New strategy prompt is:\n{self.strategy}'
 
-class LactChain(nn.Module):
+class LactChain(object):
     
     MODEL_MAP:dict[str, str]={
         'meta-llama/Meta-Llama-3-8B-Instruct': 'llama-3', 
@@ -104,6 +103,7 @@ class LactChain(nn.Module):
         }
     
     def __init__(self,
+                 backend:str,
                  model:str,
                  model_type:str,
                  config:ActorConfig,
@@ -114,8 +114,7 @@ class LactChain(nn.Module):
         assert model_type in self.MODEL_MAP.values() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
         
         MODEL_TYPE=model_type
-        STRATEGY='gridworld'
-        self._prompt=Prompts(MODEL_TYPE, STRATEGY)
+        self._prompt=Prompts(backend, MODEL_TYPE)
         
         self._strategy=Strategy(self._prompt.prompt, self._prompt.strategy)
         self.error_number=1000
@@ -141,11 +140,16 @@ class LactChain(nn.Module):
                 generator=_generator(config.huggingfaceconfig, lora_config)
             else:
                 generator=_generator(config.huggingfaceconfig)
-
-        for param in self.parameters():
-            param.requires_grad = False
+                
+            for param in generator.model.parameters():
+                param.requires_grad = False
+                
+        elif config.backend=='vllm': 
+            config.vllmconfig.pretrained_model_name_or_path=model
+            generator=_generator(config.vllmconfig)
 
         self.generator=generator
+        self.config=config
         
     @property
     def outputs(self): 
@@ -179,10 +183,12 @@ class LactChain(nn.Module):
         for batch_idx, actions in enumerate(batch_actions):
             mapped_actions=np.array([map.get(action) for action in actions])
             for action in mapped_actions: 
-                if action not in [0, 1]: 
-                    mapped_actions=np.array([self.error_number])
-                    drop_indices.append(batch_idx)
-                    break
+                assert action in [0, 1, 1000], f'MAP ACTION ERROR, ACTION MUST BE [0, 1, 1000]'
+            # for action in mapped_actions: 
+            #     if action not in [0, 1]: 
+            #         mapped_actions=np.array([self.error_number])
+            #         drop_indices.append(batch_idx)
+            #         break   
             batch_mapped_actions.append(mapped_actions)
             
         return batch_mapped_actions, drop_indices
@@ -212,8 +218,10 @@ class LactChain(nn.Module):
             strategies.append(strategy)
         
         batch_size=len(strategies) # optional batch size 
-        
-        outputs=self.generator.generate(strategies, batch_size)
+        if self.config.backend=='vllm':
+            outputs=self.generator.generate(strategies)
+        elif self.config.backend=='huggingface':
+            outputs=self.generator.generate(strategies, batch_size)
         self._outputs=outputs
         parsed_outputs=self.batch_parse_outputs(outputs)
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
@@ -228,14 +236,20 @@ class LactChain(nn.Module):
 
 if __name__=="__main__":
 
-    output='''{"explain":"Hlleo", "actions":["move right", "move left"]}'''
-
+    # output='''{"explain":"Hlleo", "actions":["move right", "move left"]}'''
+    from lactchain.models.prompts import Prompts
+    
+    ACTOR_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'
+    
+    prompt=Prompts('vllm', model_type='mistral-7b')
+    
     lora_config=LoraConfigSettings()
-    policy_config=ActorConfig()
+    policy_config=ActorConfig(backend='vllm')
     
-    actor=LactChain('/nfs/lambda_stor_01/homes/bhsu/huggingface_models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de', 
-                    policy_config, 
-                    lora_config)
+    actor=LactChain(backend='vllm',
+                    model=ACTOR_PATH, 
+                    model_type='mistral-7b',
+                    config=policy_config, 
+                    lora_config=lora_config)
     
 
-    breakpoint()

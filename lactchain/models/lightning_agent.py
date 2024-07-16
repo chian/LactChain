@@ -24,9 +24,11 @@ class LightningA2C(pl.LightningModule):
         }
     
     def __init__(self, 
-                 actor_model:str,
-                 actor_model_type:str,
-                 actor_config:ActorConfig,
+                 actor:LactChain,
+                #  backend:str,
+                #  actor_model:str,
+                #  actor_model_type:str,
+                #  actor_config:ActorConfig,
                  lora_config:LoraConfigSettings,
                  critic_model:str,
                  critic_config:ValueFunctionConfig, 
@@ -34,25 +36,20 @@ class LightningA2C(pl.LightningModule):
                  ):
         '''Lightning Model that Joins Frozen Actor and Trainable Critic'''
         super().__init__()
+        # assert actor_model_type in self.MODEL_MAP.values() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
         
-        assert actor_model_type in self.MODEL_MAP.values() , f'''Current supported models are only llama-3 8B models and mistral 7B-V0.3 and Mixtral 8x7B'''
-        
-        self.actor=LactChain(actor_model, actor_model_type, actor_config, lora_config)
+        # self.actor=LactChain(backend, actor_model, actor_model_type, actor_config, lora_config)
+        self.actor=actor
         self.critic=ValueFunction(critic_model, critic_config)
         
         self.gamma=gamma
-
-        for param in self.actor.parameters():
-            param.requires_grad = False
             
         self._total_params=sum(
-            [p.numel() for p in self.actor.parameters()] + 
             [p.numel() for p in self.critic.parameters()] + 
             [p.numel() for p in self.critic.q_value_head.parameters()]
             )
             
         self._total_trainable_params=sum(
-            [p.numel() for p in self.actor.parameters() if p.requires_grad] + 
             [p.numel() for p in self.critic.parameters() if p.requires_grad] + 
             [p.numel() for p in self.critic.q_value_head.parameters() if p.requires_grad]
             )
@@ -184,6 +181,10 @@ class LightningA2C(pl.LightningModule):
         critic_loss: Tensor 
             loss of shape B
         '''
+        # move batch inputs to device
+        for key in inputs: 
+            inputs[key] = inputs[key].to(self.device)
+
         values=self(**inputs)
         cumulative_returns=self.calculate_returns(rewards).to(values.device)
         critic_loss=F.smooth_l1_loss(cumulative_returns, values)
@@ -192,15 +193,6 @@ class LightningA2C(pl.LightningModule):
     
     def configure_optimizers(self, lr: float):
         return torch.optim.Adam(self.parameters(), lr=lr, eps=1e-4)
-    
-    # def save(self, save_path:str):
-    #     self.peft_model.save_pretrained(save_path)
-    #     torch.save(self.linear.state_dict(), f"{save_path}/linear_layer.pth")
-
-    # def load(self, load_path:str):
-    #     self.peft_model = PeftModel.from_pretrained(self.base_model, load_path)
-    #     self.linear.load_state_dict(torch.load(f"{load_path}/linear_layer.pth"))
-
     
     def state_dict(self, *args, **kwargs):
         '''Overriding state dict to save only lora + q-value head'''

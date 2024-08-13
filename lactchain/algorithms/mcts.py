@@ -1,7 +1,7 @@
 import math, numpy as np
 import logging 
 
-from lactchain.utils import configure_logger
+from lactchain.utils.utils import configure_logger
 from lactchain.configs.base_config import BaseConfig
 
 class MCTSConfig(BaseConfig): 

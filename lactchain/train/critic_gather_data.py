@@ -273,57 +273,75 @@ def train(
             fabric.log_dict({"Epoch loss": epoch_loss})
             logger.info(f'Epoch Loss: {epoch_loss}\n') if fabric.global_rank == 0 else None
             lr_scheduler.step()
+            
+            
+            
+############################# GENERATING DATASET ##########################
 
 def main():
+    
+    from lactchain.datasets.critic_dataset import CriticDataset
+    
     args=argparse()
     
     wandb_logger=WandbLogger(project="Lactchain-Critic-Tuning", offline=args.log_wandb_offline)
-    # Initialize Fabric
-    fabric = Fabric(loggers=wandb_logger)
-    # device settings
-    global_rank = fabric.global_rank # rank on global devices 
-    world_size = fabric.world_size # total num devices 
-    device = fabric.device
-    local_rank=fabric.local_rank # rank on local node 
+    # # Initialize Fabric
+    # fabric = Fabric(loggers=wandb_logger)
+    # # device settings
+    # global_rank = fabric.global_rank # rank on global devices 
+    # world_size = fabric.world_size # total num devices 
+    # device = fabric.device
+    # local_rank=fabric.local_rank # rank on local node 
     
-    logger = configure_logger(args.logging_level, args.logging_save_path, global_rank)
+    logger = configure_logger(args.logging_level, args.logging_save_path)
     
     global_buffer_size=args.global_buffer_size # max buffer size across ranks
-    local_buffer_size=math.ceil(global_buffer_size / world_size) # per rank buffer size 
-    local_quarter_buffer_size=math.ceil(local_buffer_size / 4) # size for quarter of local buffer size for tracking
+    # local_buffer_size=math.ceil(global_buffer_size / world_size) # per rank buffer size 
+    
+    local_buffer_size=global_buffer_size # for now rank=1, so local same as global 
+
     num_collection_steps=math.ceil(local_buffer_size / args.collection_batch_size) # num_collection_steps per rank
     
     max_tries_per_rank=math.ceil(num_collection_steps * 2)
     
     logging.info(f'''LOGGING WITH THE FOLLOWING:\n\
                  GLOBAL BUFFER SIZE: {global_buffer_size}\
-                 \nNUMBER OF RANKS: {world_size}\
                  \nLOCAL BUFFER SIZE: {local_buffer_size}\  
                  \nCOLLECTION BATCH SIZE PER RANK: {args.collection_batch_size}\
                  \nTRAIN BATCH SIZE PER RANK: {args.train_batch_size}\
                  \nGRAD ACCUM SIZE: {args.gradient_accumulation_steps}\
                  \nNUM EPOCHS: {args.num_epochs}\
                  \nNUM EPISODES: {args.num_episodes}
-                 ''') if global_rank==0 else None
+                 ''')
     
     actor_config=ActorConfig(backend=args.backend)
     lora_config=LoraConfigSettings()
     critic_config=ValueFunctionConfig()
     
-    if args.backend=='vllm': 
-        assert len(args.hosts) == world_size, \
-        f'''Number of hosts must match the number of gpus since we are doing DDP style Training'''
-        actor_config.vllmconfig.server=True
-        actor_config.vllmconfig.host=args.hosts[global_rank]
-        actor_config.vllmconfig.api_key=args.api_key
+    # if args.backend=='vllm': 
+    #     assert len(args.hosts) == world_size, \
+    #     f'''Number of hosts must match the number of gpus since we are doing DDP style Training'''
+    #     actor_config.vllmconfig.server=True
+    #     # actor_config.vllmconfig.host=args.hosts[global_rank]
+    #     actor_config.vllmconfig.api_key=args.api_key
     
-    vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(args.collection_batch_size)])
-    actor=LactChain(args.backend, args.actor_path, args.actor_model_type, actor_config, lora_config)
-    agent=LightningA2C(actor, lora_config, args.critic_path, critic_config, args.gamma)
+    asynch_environment = gym.vector.AsyncVectorEnv([make_env for _ in range(args.collection_batch_size)])
+    actor=LactChain('vllm', 
+                    args.actor_path, 
+                    args.actor_model_type, 
+                    actor_config, 
+                    lora_config
+                    )
+    agent=LightningA2C(actor, 
+                       lora_config, 
+                       args.critic_path, 
+                       critic_config, 
+                       args.gamma
+                       )
     
     logger.debug(f'STARTING TRAINING WITH THIS PROMPT TEMPLATE:\n{agent.final_prompt_template} FOR ACTOR MODEL:\n{agent.actor_model} AND CRITIC MODEL:\n{agent.critic}\n MODEL_PATH:{args.actor_path}')
-    logger.debug(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
-    optimizer = agent.configure_optimizers(args.learning_rate)
+    # logger.debug(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
+    # optimizer = agent.configure_optimizers(args.learning_rate)
     
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
@@ -338,26 +356,26 @@ def main():
         if path is None:
             logger.info(
                 f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
-            ) if global_rank==0 else None
+            )
             args.resume_from_checkpoint = None
 
         else:
-            logger.info(f"RESUMING FROM CHECKPOINT: {path}\n") if global_rank==0 else None
+            logger.info(f"RESUMING FROM CHECKPOINT: {path}\n")
             # critic_state_dict=agent.state_dict() # getting the model state dict 
             # fabric.load(os.path.join(args.output_dir, path), critic_state_dict) # fill it wit da checkpoint yuh
             
             critic_state_dict=agent.state_dict()
             state = AttributeDict(model1=critic_state_dict, optimizer=optimizer)
-            full_checkpoint=fabric.load(os.path.join(args.output_dir, path), state) # fill it wit da checkpoint yuh
+            full_checkpoint=torch.load(os.path.join(args.output_dir, path), state) # fill it wit da checkpoint yuh
             assert bool(full_checkpoint)==False, f'WARNING: THERE WERE THINGS NOT LOADED PROPERLY FOR THE MODEL STATE'
             parsed_filename = re.search(r'critic_checkpoint-(\d+)\.ckpt', path)
             episode = int(parsed_filename.group(1))
             # agent.load_state_dict(full_checkpoint['model'])
             # optimizer.load_state_dict(full_checkpoint['optimizer'])
 
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
-    agent, optimizer = fabric.setup(agent, optimizer)
-    agent.mark_forward_method('sample_actions') # check: register sample actions as a forward method 
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+    # agent, optimizer = fabric.setup(agent, optimizer)
+    # agent.mark_forward_method('sample_actions') # check: register sample actions as a forward method 
     
     progress_bar = tqdm(
         range(0, num_collection_steps),
@@ -371,19 +389,19 @@ def main():
     
     for episode in range(args.num_episodes):
         
-        fabric.barrier(name='Episode Syncing') # sync per episode
-        logger.info(f'Starting Episode {episode+1} on all ranks...') if global_rank==0 else None
+        # fabric.barrier(name='Episode Syncing') # sync per episode
+        logger.info(f'Starting Episode {episode+1} on all ranks...')
         rewards=[]
         batched_inputs={}
         steps_kept=0
         buffer_size=0
         
-        obs, info = vector_env.reset()
+        obs, info = asynch_environment.reset()
         obs, info=process_environment_outputs(obs, info)
         with torch.autograd.set_detect_anomaly(True):
             with torch.no_grad(): 
                 
-                logger.info(f'COLLECTING EXPERIENCE FOR RANK {global_rank}, ESTIMATED NUMBER OF COLLECTION STEPS PER RANK: {num_collection_steps}\n')
+                logger.info(f'COLLECTING EXPERIENCE, ESTIMATED NUMBER OF COLLECTION STEPS PER RANK: {num_collection_steps}\n')
                 exit_early=False
                 step=0
 
@@ -392,7 +410,7 @@ def main():
                     try: 
                         batch_mapped_actions, _actions, _contexts, drop_indices=agent.sample_actions(obs, info)
                         
-                        next_obs, reward, _done, _truncated, info = vector_env.step(batch_mapped_actions)
+                        next_obs, reward, _done, _truncated, info = asynch_environment.step(batch_mapped_actions)
                         next_obs, info=process_environment_outputs(next_obs, info)
                         inputs=agent.compile_and_tokenize(next_obs, info)                        
                         rewards.append(reward)
@@ -417,8 +435,8 @@ def main():
                         exit_early=True
                         break
 
-        logger.info(f'''FOR RANK {global_rank} TOTAL STEPS:{step} STEPS KEPT:{steps_kept} GATHERING LOCAL BUFFER FROM RANK {global_rank}...\n''')        
-        fabric.barrier(name='All Gather Sync')
+        logger.info(f'''FOR TOTAL STEPS:{step} STEPS KEPT:{steps_kept} GATHERING LOCAL BUFFER FROM RANK {global_rank}...\n''')        
+        # fabric.barrier(name='All Gather Sync')
         device='cpu'
         
         if exit_early: 
@@ -450,7 +468,7 @@ def main():
             # Truncate dataset in dim=0 if we oversample
             rewards=torch.from_numpy(np.stack(rewards)).flatten()
             if rewards.shape[0]>local_buffer_size: 
-                logger.info(f'RANK {local_rank} OVERSAMPLED LOCAL BUFFER SIZE LIMIT OF {local_buffer_size}, DROPPING {int(rewards.shape[0] - local_buffer_size)} SAMPLES...')
+                logger.info(f'RANK OVERSAMPLED LOCAL BUFFER SIZE LIMIT OF {local_buffer_size}, DROPPING {int(rewards.shape[0] - local_buffer_size)} SAMPLES...')
                 rewards=rewards[:local_buffer_size]
                 batched_inputs['input_ids']=batched_inputs['input_ids'][:local_buffer_size,:]
                 batched_inputs['attention_mask']=batched_inputs['attention_mask'][:local_buffer_size,:]
@@ -465,23 +483,23 @@ def main():
                 }
         
         # flatten data across rank and batch size rewards = size [rank * B] and batched_inputs = [rank * B, T]
-        gathered_data = fabric.all_gather(local_data)
-        # moving stuff to cpu to preserve gpu memory 
-        gathered_data['rewards']=gathered_data['rewards'].cpu()
-        gathered_data['batched_inputs']['input_ids']=gathered_data['batched_inputs']['input_ids'].cpu()
-        gathered_data['batched_inputs']['attention_mask']=gathered_data['batched_inputs']['attention_mask'].cpu()
-        del local_data # delete local data to free up memory 
+        # gathered_data = fabric.all_gather(local_data)
+        # # moving stuff to cpu to preserve gpu memory 
+        # gathered_data['rewards']=gathered_data['rewards'].cpu()
+        # gathered_data['batched_inputs']['input_ids']=gathered_data['batched_inputs']['input_ids'].cpu()
+        # gathered_data['batched_inputs']['attention_mask']=gathered_data['batched_inputs']['attention_mask'].cpu()
+        # del local_data # delete local data to free up memory 
             
-        logger.info(f'DEVICES FOR GATHERED DATA:\nREWARDS: {rewards.device}\nINPUTS: {batched_inputs["input_ids"].device}\nATTENTION_MASK: {batched_inputs["attention_mask"].device}')
+        # logger.info(f'DEVICES FOR GATHERED DATA:\nREWARDS: {rewards.device}\nINPUTS: {batched_inputs["input_ids"].device}\nATTENTION_MASK: {batched_inputs["attention_mask"].device}')
         
-        gathered_data['rewards']=gathered_data['rewards'].flatten()
+        # gathered_data['rewards']=gathered_data['rewards'].flatten()
         
-        max_seq_len=gathered_data['batched_inputs']['input_ids'].shape[-1]
-        gathered_data['batched_inputs']['input_ids']=gathered_data['batched_inputs']['input_ids'].reshape(-1, max_seq_len)  
-        gathered_data["batched_inputs"]['attention_mask']=gathered_data["batched_inputs"]['attention_mask'].reshape(-1, max_seq_len) 
+        # max_seq_len=gathered_data['batched_inputs']['input_ids'].shape[-1]
+        # gathered_data['batched_inputs']['input_ids']=gathered_data['batched_inputs']['input_ids'].reshape(-1, max_seq_len)  
+        # gathered_data["batched_inputs"]['attention_mask']=gathered_data["batched_inputs"]['attention_mask'].reshape(-1, max_seq_len) 
         
         # filter out fake tensors 
-        logger.info(f'FILTERING OUT FAKE TENSORS ON RANK {global_rank}')
+        logger.info(f'FILTERING OUT FAKE TENSORS')
         # refilter out the fake tensor data
         for key, value in gathered_data.items():
             if isinstance(value, dict):
@@ -494,49 +512,38 @@ def main():
         logger.debug(f'INPUT_IDS SHAPE: {gathered_data["batched_inputs"]["input_ids"].shape}')
         logger.debug(f'ATTENTION_MASK SHAPE: {gathered_data["batched_inputs"]["attention_mask"].shape}')
         
-        fabric.log_dict({'AVERAGE REWARD FOR ALL RANKS':torch.sum(gathered_data["rewards"]) // world_size})
-        logger.info(f'AVERAGE REWARD FOR ALL RANKS:{torch.sum(gathered_data["rewards"]) // world_size}') if global_rank==0 else None
+        logger.info({'AVERAGE REWARD FOR ALL RANKS':torch.sum(gathered_data["rewards"])})
+        logger.info(f'AVERAGE REWARD FOR ALL RANKS:{torch.sum(gathered_data["rewards"])}')
         
         logger.debug(f'GATHERED DATA BEFORE TRAINING DEVICE: {gathered_data["rewards"].device}')
         
         torch.cuda.empty_cache()
-        train(fabric, agent, optimizer, lr_scheduler, gathered_data, args, logger)  
+    
         
-        if episode % args.checkpointing_steps == 0:
-            if fabric.global_rank == 0:
-                if args.checkpoints_total_limit is not None:
-                    checkpoints = os.listdir(args.output_dir)
-                    checkpoints = [d for d in checkpoints if d.startswith("critic_checkpoint") and d.endswith(".ckpt")]
-                    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1].split(".")[0]))
-                    # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
-                    if len(checkpoints) >= args.checkpoints_total_limit:
-                        num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
-                        removing_checkpoints = checkpoints[0:num_to_remove]
-                        logger.info(
-                            f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
-                        )
-                        logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+        breakpoint()
+        # train(fabric, agent, optimizer, lr_scheduler, gathered_data, args, logger)  
+        
+        # if episode % args.checkpointing_steps == 0:
+        #     if fabric.global_rank == 0:
+        #         if args.checkpoints_total_limit is not None:
+        #             checkpoints = os.listdir(args.output_dir)
+        #             checkpoints = [d for d in checkpoints if d.startswith("critic_checkpoint") and d.endswith(".ckpt")]
+        #             checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1].split(".")[0]))
+        #             # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
+        #             if len(checkpoints) >= args.checkpoints_total_limit:
+        #                 num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+        #                 removing_checkpoints = checkpoints[0:num_to_remove]
+        #                 logger.info(
+        #                     f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
+        #                 )
+        #                 logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
                         
-                        for removing_checkpoint in removing_checkpoints:
-                            removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                            shutil.rmtree(removing_checkpoint)
+        #                 for removing_checkpoint in removing_checkpoints:
+        #                     removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+        #                     shutil.rmtree(removing_checkpoint)
 
-            save_path = os.path.join(args.output_dir, f"critic_checkpoint-{episode}.ckpt")
-            critic_state_dict=agent.state_dict()
-            state = AttributeDict(model1=critic_state_dict, optimizer=optimizer)
-            fabric.save(save_path, state) # save must be called on all devices I think?
-            logger.info(f"SAVING MODEL TO: {save_path}")
-    
-    
-    
-    
-    
-def generate_data(args:ArgumentParser, actor:LactChain, dataset:CriticDataset): 
-    
-    ...
-    
-    
-    
-if __name__=="__main__": 
-    
-    main()
+        #     save_path = os.path.join(args.output_dir, f"critic_checkpoint-{episode}.ckpt")
+        #     critic_state_dict=agent.state_dict()
+        #     state = AttributeDict(model1=critic_state_dict, optimizer=optimizer)
+        #     fabric.save(save_path, state) # save must be called on all devices I think?
+        #     logger.info(f"SAVING MODEL TO: {save_path}")

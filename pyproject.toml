@@ -17,11 +17,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
 ]
+
+# older dependencies
+# "torch==2.3.1",
+# "torchaudio==2.3.1",
+# "torchvision==0.18.1",
+# "transformers==4.41.1"
 dependencies = [
-    "torch==2.3.1",
-    "torchaudio==2.3.1",
-    "torchvision==0.18.1",
-    "transformers==4.41.1",
     "pytorch-lightning==2.2.5",
     "lightning==2.3.1",
     "python-dotenv==1.0.1",
@@ -43,7 +45,8 @@ dependencies = [
     "sentencepiece==0.2.0", 
     "flash-attn==2.5.9.post1", 
     "optimum==1.21.2", 
-    "vllm==0.5.1"
+    "vllm==0.5.3.post1", 
+    "parsl"
 ]
 
 

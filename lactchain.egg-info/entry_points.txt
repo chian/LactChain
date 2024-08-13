@@ -1,0 +1,2 @@
+[console_scripts]
+lactchain = latchain.cli:main

@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -l select=10
+#PBS -A FoundEpidem
+#PBS -l walltime=3:00:00
+#PBS -l filesystems=home:eagle
+#PBS -q prod
+
+### Name of your session
+#PBS -N SMALL_Critic_Finetuning
+
+### Controlling output of application 
+#PBS -k doe
+#PBS -o ./../../../logs/output_logs/small_output_mistral_7b
+#PBS -e ./../../../logs/error_logs/small_error_mistral_7b
+
+### email notification
+#PBS -m be
+#PBS -M bhsu@anl.gov
+cd $PBS_O_WORKDIR
+echo "Current working directory: {$PBS_O_WORKDIR}"
+
+### directions 
+module load conda/2024-04-29
+conda activate lactchain4
+cd ../../../
+
+TRAIN_DIR=$(pwd)
+PRETRAINED_ACTOR_DIR='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/LactChain/lactchain/train/hf_ckpts/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'
+PRETRAINED_CRITIC_DIR='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/LactChain/lactchain/train/hf_ckpts/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'
+LOGGING_SAVE_PATH='./logs/python_logs/pbs_small_mistral_7b.log'
+OUTPUT_DIR='./finetuned-critic/'
+
+echo "Launching Fabric From Directory: {$TRAIN_DIR}"
+
+## Running actual script
+fabric run critic_train_lightning.py \
+    --backend 'huggingface' \
+    --actor_path $PRETRAINED_ACTOR_DIR \
+	--actor_model_type 'mistral-7b' \
+    --critic_path $PRETRAINED_CRITIC_DIR \
+    --logging_level 'info' \
+    --logging_save_path $LOGGING_SAVE_PATH \
+    --log_wandb_offline False \
+    --gamma 0.99 \
+    --learning_rate 1e-4 \
+    --num_epochs 5 \
+    --num_episodes 5 \
+    --global_buffer_size 5000 \
+    --collection_batch_size 32 \
+    --train_batch_size 32 \
+    --gradient_accumulation_steps 8 \
+    --checkpoints_total_limit 10 \
+    --checkpointing_steps 2 \
+    --output_dir $OUTPUT_DIR \
+    --devices 4 \
+    --accelerator 'cuda' \
+	--strategy 'ddp' 

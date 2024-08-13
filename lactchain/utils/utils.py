@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, TypeVar
 import pkg_resources
 import os, logging
 from argparse import ArgumentParser
@@ -7,7 +7,9 @@ import torch
 from torch import Tensor
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 
-from lactchain.models.lightning_agent import LightningA2C
+# from lactchain.models.lightning_agent import LightningA2C
+
+_T = TypeVar('_T')
 
 def configure_logger(level:str='debug', 
                      logging_save_path:Optional[str]=None, 
@@ -38,6 +40,29 @@ def configure_logger(level:str='debug',
     logger.addHandler(fh)
     
     return logger
+
+def batch_data(data: list[_T], chunk_size: int) -> list[list[_T]]:
+    """Batch data into chunks of size chunk_size.
+
+    Parameters
+    ----------
+    data : list[T]
+        The data to batch.
+    chunk_size : int
+        The size of each batch.
+
+    Returns
+    -------
+    list[list[T]]
+        The batched data.
+    """
+    batches = [
+        data[i * chunk_size : (i + 1) * chunk_size]
+        for i in range(0, len(data) // chunk_size)
+    ]
+    if len(data) > chunk_size * len(batches):
+        batches.append(data[len(batches) * chunk_size :])
+    return batches
 
 def load_lactchain_path(checkpoint_dir:str='/checkpoints/') -> str: 
     """Return Trunk Path to Lactchain package"""
@@ -83,14 +108,14 @@ def filter_fake_tensors(tensor:Tensor) -> Tensor:
     return tensor[mask]
 
 # LEGACY / BACKUP UTILS
-def save_only_trainable_weights(lightning_model:LightningA2C, path:str):
-    '''Saves lora + q_value weights only'''
-    torch.save(lightning_model.state_dict(), path)
+# def save_only_trainable_weights(lightning_model:LightningA2C, path:str):
+#     '''Saves lora + q_value weights only'''
+#     torch.save(lightning_model.state_dict(), path)
     
-def load_only_trainable_weights(lightning_model:LightningA2C, path:str):
-    '''Loads lora + q_value weights only'''
-    state_dict = torch.load(path)
-    lightning_model.load_state_dict(state_dict, strict=False)
+# def load_only_trainable_weights(lightning_model:LightningA2C, path:str):
+#     '''Loads lora + q_value weights only'''
+#     state_dict = torch.load(path)
+#     lightning_model.load_state_dict(state_dict, strict=False)
         
 
 

@@ -1,5 +1,5 @@
 from textwrap import dedent
-from typing import Any, List, Dict, Optional, Literal, Tuple
+from typing import Any, List, Dict, Optional, Literal, Tuple, TypeVar, Callable
 from pydantic import BaseModel, Field
 from langchain.output_parsers import PydanticOutputParser
 import torch
@@ -8,6 +8,11 @@ import pprint as pp
 import json
 import lightning as pl
 from lactchain.configs.base_config import BaseConfig
+
+from lactchain.classes.base_generator import LLMGenerator
+from lactchain.classes.base_prompt import BasePromptTemplate
+from lactchain.classes.base_lactchain import LactChain, StrategyChain
+
 from lactchain.models.backends.langchain_backend import LangChainGenerator, GeneratorConfig
 from lactchain.models.backends.vllm_backend import VLLMGeneratorConfig, VLLMGenerator
 from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator, 
@@ -15,6 +20,8 @@ from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator,
                                                            LoraConfigSettings)
 from lactchain.models.prompts import Prompts
 ############################################################################
+
+_T = TypeVar['_T']
 
 class ActorConfig(BaseConfig):
     backend:Literal['langchain', 'huggingface', 'vllm']=Field('huggingface')
@@ -158,7 +165,10 @@ class LactChain(object):
         '''
         return self._outputs
 
-    def compile_prompts(self, state:str | list[str], info:str | list[str]) -> str | list[str]:
+    def compile_prompts(self, 
+                        state:str | list[str], 
+                        info:str | list[str]
+                        ) -> str | list[str]:
         '''Returns the whole prompt as a str. You can pass in a list of states and infos to get 
         a batch output of strategies 
         '''
@@ -170,7 +180,9 @@ class LactChain(object):
         else: 
             return self._strategy(state, info)
             
-    def map_actions(self, batch_actions:list[str]) -> Tuple[list[np.ndarray], list[int]]: 
+    def map_actions(self, 
+                    batch_actions:list[str]
+                    ) -> Tuple[list[np.ndarray], list[int]]: 
         '''Helper function that maps list of processed outputs from llm into binary actions 
         as a list of arrays
         '''
@@ -180,10 +192,11 @@ class LactChain(object):
         }
         batch_mapped_actions=[]
         drop_indices=[]
+
         for batch_idx, actions in enumerate(batch_actions):
             mapped_actions=np.array([map.get(action) for action in actions])
             for action in mapped_actions: 
-                assert action in [0, 1, 1000], f'MAP ACTION ERROR, ACTION MUST BE [0, 1, 1000]'
+                assert action in [0, 1, 1000], f'MAP ACTION ERROR: {action} AT {batch_idx}, ACTION MUST BE [0, 1, 1000]'
             # for action in mapped_actions: 
             #     if action not in [0, 1]: 
             #         mapped_actions=np.array([self.error_number])
@@ -199,6 +212,7 @@ class LactChain(object):
         '''
         parsed_outputs=[]
         for _, output in enumerate(outputs):
+            # print(output)
             parsed_outputs.append(json.loads(output))
             
         return parsed_outputs
@@ -223,16 +237,57 @@ class LactChain(object):
         elif self.config.backend=='huggingface':
             outputs=self.generator.generate(strategies, batch_size)
         self._outputs=outputs
+        
+        # print(f'Outputs: {outputs}')
+        
         parsed_outputs=self.batch_parse_outputs(outputs)
         actions=[parsed_output['moves'] for parsed_output in parsed_outputs]
         contexts=[parsed_output['explain'] for parsed_output in parsed_outputs]
+        
+        # print(f'Actions: {actions}')
+        
         mapped_actions, num_actions_dropped=self.map_actions(actions)
         
         return mapped_actions, actions, contexts, num_actions_dropped
     
     
-        
+    
+class StrategyChain(StrategyChain):
+    '''Single Actor-Based Chain for On-Policy Sampling''' 
+    def __init__(self, 
+                 generator: LLMGenerator,
+                 prompt_template: BasePromptTemplate, 
+                 solver: Optional[Callable]
+                 ) -> None: 
+        '''Container actor chain class'''
 
+        self.generator=generator
+        self.prompt_template=prompt_template
+        self.solver = solver
+        
+    
+    @classmethod
+    def initialize_chain(cls: _T, 
+                         generator: LLMGenerator, 
+                         prompt_template: BasePromptTemplate
+                         ) -> _T: 
+        '''Initialize the latchain by passing in the generator and prompt template'''
+    
+    def sample_actions(self, 
+                       states: list[str], 
+                       infos: list[str]
+                       ) -> list[str]: 
+        ...    
+        
+    def batch_parse_outputs(self, outputs:list[str]) -> list[str]:
+        '''Loops through the list of outputs and json parses them to return a list of 
+        processed strings
+        '''
+        parsed_outputs=[]
+        for _, output in enumerate(outputs):
+            # print(output)
+            parsed_outputs.append(json.loads(output))
+        return parsed_outputs
 
 if __name__=="__main__":
 

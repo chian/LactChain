@@ -24,7 +24,7 @@ from lactchain.models.lightning_agent import LightningA2C
 from lactchain.environments.grid_world import GridEnvironment, VectorizedGridWorld
 from lactchain.models.critic import ValueFunction, ValueFunctionConfig, LoraConfigSettings
 from lactchain.models.actor import LactChain, ActorConfig, Strategy
-from lactchain.utils import configure_logger, unfold_list_of_lists, add_inputs_to_dict, join_inputs
+from lactchain.utils.utils import configure_logger, unfold_list_of_lists, add_inputs_to_dict, join_inputs
 from lactchain.environments.grid_world import make_env, process_environment_outputs
 
 '''GRAB OBSERVATION SET --> TORCH MULTINOMIAL --> SAMPLE BATCH OF STATES 
@@ -54,7 +54,8 @@ os.environ['TORCH_LOGS']="+dynamo"
 os.environ['TORCHDYNAMO_VERBOSE']='1'
 # default actor path
 ACTOR_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--mistralai--Mistral-7B-Instruct-v0.3/snapshots/83e9aa141f2e28c82232fea5325f54edf17c43de'
-ACTOR_MODEL_TYPE='llama-3'
+ACTOR_MODEL_TYPE='mistral-7b'
+
 CRITIC_PATH='/lus/eagle/projects/FoundEpidem/bhsu/2024_research/models/models--Salesforce--SFR-Embedding-Mistral/snapshots/938c560d1c236aa563b2dbdf084f28ab28bccb11'
 
 @dataclass
@@ -72,6 +73,12 @@ class DPOData:
 
 def argparse(): 
     parser=ArgumentParser()
+    parser.add_argument(
+        '--backend', 
+        type=str, 
+        default='huggingface', 
+        help='''Path to frozen causal model'''
+        )
     parser.add_argument(
         '--actor_path', 
         type=str, 
@@ -91,21 +98,21 @@ def argparse():
         help='''Path to trainable embedding model'''
         )
     parser.add_argument(
-        '--global_dataset_size', 
-        type=str, 
-        default=10000, 
+        '--global_buffer_size', 
+        type=int, 
+        default=100, 
         help='''Total size of the dataset to be built'''
         )
     parser.add_argument(
         '--num_dataset_shards', 
         type=str, 
-        default=1000, 
+        default=2, 
         help='''Number of shards to split the total dataset size to'''
         )
     parser.add_argument(
         '--per_rank_batch_size', 
         type=int, 
-        default=32, 
+        default=4, 
         help='batch size for sampling states + infos'
     )
     parser.add_argument(
@@ -181,7 +188,7 @@ def main():
     ACTOR_PATH=args.actor_path
     ACTOR_MODEL_TYPE=args.actor_model_type
     CRITIC_PATH=args.critic_path
-    GLOBAL_DATASET_SIZE=args.global_dataset_size
+    GLOBAL_BUFFER_SIZE=args.global_buffer_size
     NUM_DATASET_SHARDS=args.num_dataset_shards
     PER_RANK_BATCH_SIZE=args.per_rank_batch_size
     RESUME_FROM_CHECKPOINT=args.resume_from_checkpoint
@@ -200,29 +207,34 @@ def main():
     device = fabric.device
     local_rank=fabric.local_rank # rank on local node 
     
-    GLOBAL_DATASET_SHARD_SIZE=math.floor(GLOBAL_DATASET_SIZE / NUM_DATASET_SHARDS)
+    GLOBAL_DATASET_SHARD_SIZE=math.floor(GLOBAL_BUFFER_SIZE / NUM_DATASET_SHARDS)
     LOCAL_SHARD_SIZE=math.floor(GLOBAL_DATASET_SHARD_SIZE / WORLD_SIZE)
     NUM_COLLECTION_STEPS=math.floor(LOCAL_SHARD_SIZE / PER_RANK_BATCH_SIZE) * LOCAL_SHARD_SIZE
     
     logging.info(f'''LOGGING WITH THE FOLLOWING:\n\
-                GLOBAL DATASET SIZE: {GLOBAL_DATASET_SIZE}\
+                GLOBAL DATASET SIZE: {GLOBAL_BUFFER_SIZE}\
                 NUM DATASET SHARDS TO MAKE: {GLOBAL_DATASET_SHARD_SIZE}
                 \nNUMBER OF RANKS: {WORLD_SIZE}\
                 \nLOCAL DATASET SHARD SIZE: {LOCAL_SHARD_SIZE}\  
                 \nCOLLECTION BATCH SIZE PER RANK: {PER_RANK_BATCH_SIZE}
                 ''')
     
-    actor_config=ActorConfig()
+    actor_config=ActorConfig(backend=args.backend)
     lora_config=LoraConfigSettings()
     critic_config=ValueFunctionConfig()
     
     vector_env = gym.vector.AsyncVectorEnv([make_env for _ in range(PER_RANK_BATCH_SIZE)])
     dummy_env=VectorizedGridWorld()
     data=DPOData()
-    agent=LightningA2C(ACTOR_PATH, ACTOR_MODEL_TYPE, 
-                       actor_config, lora_config, 
-                       CRITIC_PATH, critic_config, GAMMA)
+    actor=LactChain(args.backend, args.actor_path, args.actor_model_type, actor_config, lora_config)
+    fabric.print(f'actor type {args.actor_model_type}')
+    agent=LightningA2C(actor, lora_config, CRITIC_PATH, critic_config, GAMMA)
+    fabric.print(f'actor type {agent.final_prompt_template}')
     
+    agent = fabric.setup(agent)
+    
+    agent.mark_forward_method('sample_actions')
+    agent.mark_forward_method('calculate_advantages')
     logger.info(f'Model Trainable Params:\n{agent.model_trainable_params}, Device:\n{fabric.accelerator}')
     
     # Potentially load in the weights and states from a previous save
@@ -249,8 +261,7 @@ def main():
             # optimizer.load_state_dict(full_checkpoint['optimizer'])
     
     # agent, optimizer = fabric.setup(agent, optimizer)
-    agent = fabric.setup(agent)
-    per_rank_dataset_size=int(GLOBAL_DATASET_SIZE / WORLD_SIZE)
+    per_rank_dataset_size=int(GLOBAL_BUFFER_SIZE / WORLD_SIZE)
     
     logger.info(f'SAMPLING {per_rank_dataset_size} STATES FOR RANK {global_rank}')
     buffer_size=0
@@ -267,30 +278,31 @@ def main():
     global_step=0
     steps_kept=0
     
-    
-    
     with torch.no_grad():
-        for shard in range(NUM_DATASET_SHARDS):
+        # for shard in range(NUM_DATASET_SHARDS):
             
             shard_prompt_inputs=[]
             shard_chosen_inputs=[]
             shard_rejected_inputs=[]
             
+            batch_chosen_inputs={}
+            batch_rejected_inputs={}
+            batch_prompt_inputs={}
+            
             shard_step=0
-            logger.info(f'COLLECTING SHARD {shard} FOR RANK {global_rank}...\nESTIMATED NUMBER OF COLLECTION STEPS PER RANK: {NUM_COLLECTION_STEPS}')
+            # logger.info(f'COLLECTING SHARD {shard} FOR RANK {global_rank}...\nESTIMATED NUMBER OF COLLECTION STEPS PER RANK: {NUM_COLLECTION_STEPS}')
             # collecting next observations via batch
             while buffer_size<per_rank_dataset_size:
                 shard_step+=1
                 try: 
                     sampled_states, local_infos=sample_states_infos(dummy_env, per_rank_dataset_size, PER_RANK_BATCH_SIZE)
                     obs, info = vector_env.reset()
-                    
+                    breakpoint()
                     logging.info(f'COLLECTING FIRST SAMPLES ON RANK {global_rank} FOR BATCH SIZE {PER_RANK_BATCH_SIZE}')
-                    
+
                     batch_mapped_actions_1, actions_1, contexts_1, drop_indices=agent.sample_actions(sampled_states, local_infos)
                     next_obs_1, rewards_1, _, _, info_1 = vector_env.step(batch_mapped_actions_1)
                     next_obs_1, info_1=process_environment_outputs(next_obs_1, info_1)
-                    
                     obs, info = vector_env.reset()
                     
                     batch_mapped_actions_2, actions_2, contexts_2, drop_indices=agent.sample_actions(sampled_states, local_infos)
@@ -302,56 +314,128 @@ def main():
                     advantages_1=agent.calculate_advantages(rewards_1, inputs_1)
                     inputs_2=agent.compile_and_tokenize(next_obs_2, info_2)
                     advantages_2=agent.calculate_advantages(rewards_2, inputs_2)
-                    
-                    advantages=torch.transpose(torch.stack([advantages_1, advantages_2]), 0, 1)
 
-                    T = inputs_1['input_ids'].shape[1]
-                    join_idx=2
-                    
+                    advantages=torch.transpose(torch.stack([advantages_1, advantages_2]), 0, 1)
                     chosen_indices=advantages.argmax(dim=1)
-                    chosen_indices_expand = chosen_indices.unsqueeze(1).expand(-1, T)
-                    joint_inputs=join_inputs(inputs_1, inputs_2, 2) # need to gather across tensor 
-                    chosen_inputs=torch.gather(
-                        joint_inputs, dim=2, index=chosen_indices_expand.unsqueeze(join_idx)
-                        ).squeeze(join_idx)
-                    rejected_inputs=torch.gather(
-                        joint_inputs, dim=2, index=~chosen_indices_expand.unsqueeze(join_idx)
-                        ).squeeze(join_idx)
-                    prompt_inputs=agent.compile_and_tokenize(sampled_states, local_infos)['input_ids']
+                    rejected_indices= (1 - chosen_indices)
+
+                    input_ids_1, attn_mask_1=inputs_1.values()
+                    input_ids_2, attn_mask_2=inputs_2.values()
+                    concat_input_ids = torch.stack((input_ids_1, input_ids_2), dim=1) 
+                    concat_attn_masks = torch.stack((attn_mask_1, attn_mask_2), dim=1)
+
+                    chosen_indices_expand = chosen_indices.reshape(-1, 1, 1).expand(-1, 1, concat_input_ids.size(2))
+                    rejected_indices_expand = rejected_indices.reshape(-1, 1, 1).expand(-1, 1, concat_input_ids.size(2))
                     
-                    # joint_states=np.array([actions_1, actions_2])
-                    # chosen=joint_states[np.arange(len(chosen_indices)), chosen_indices]
-                    # rejected=joint_states[np.arange(len(chosen_indices)), ~chosen_indices]
-                    # logger.debug(f'''SELECTED INDICES: {chosen_indices[:10, :]}\nJOINT_STATES:{joint_states}\nCHOSEN:{chosen}''')
-                    steps_kept+=1
+                    chosen_input_ids = torch.gather(concat_input_ids, 1, chosen_indices_expand).squeeze(1)  
+                    rejected_input_ids = torch.gather(concat_input_ids, 1, rejected_indices_expand).squeeze(1)  
+                    chosen_attn_masks = torch.gather(concat_attn_masks, 1, chosen_indices_expand).squeeze(1)  
+                    rejected_attn_masks = torch.gather(concat_attn_masks, 1, rejected_indices_expand).squeeze(1)   
                     
+                    chosen_inputs={
+                        'input_ids':chosen_input_ids, 
+                        'attention_mask':chosen_attn_masks
+                    }      
+                    rejected_inputs={
+                        'input_ids':rejected_input_ids, 
+                        'attention_mask':rejected_attn_masks
+                    }
+                    prompt_inputs=agent.compile_and_tokenize(sampled_states, local_infos)
+
+                    
+                    batch_chosen_inputs=add_inputs_to_dict(batch_chosen_inputs, chosen_inputs)
+                    batch_rejected_inputs=add_inputs_to_dict(batch_rejected_inputs, rejected_inputs)
+                    batch_prompt_inputs=add_inputs_to_dict(batch_prompt_inputs, prompt_inputs)
+                    
+
                 except Exception as e: 
                     logger.info(f'PARSING ERROR ON RANK {global_rank}: {e}\nDROPPING FULL BATCH')
                     logger.debug(f'''PROPOSED OUTPUTS:\n{pp.pformat(agent.actor.outputs)}\n\n\n''')
                     continue
                 
-                logging.info(f'SUCCESSFULLY SELECTED BATCH OF SIZE {PER_RANK_BATCH_SIZE} ON RANK {global_rank}...ADDING')
-                
-                data.prompts.append(prompt_inputs)
-                data.chosen.append(chosen_inputs)
-                data.rejected.append(rejected_inputs)
-                
-                # buffer_size=len(unfold_list_of_lists(chosen)) 
-                
-            global_step+=shard_step
-        
-            logger.info(f'''GATHERING DATA FOR SHARD {shard} FOR RANK {global_rank}...TOTAL STEPS:{global_step} STEPS KEPT:{steps_kept}\n''')    
-            fabric.barrier()
-            DATA_SHARD={
-                        'prompts':data.prompts, 
-                        'chosen':data.chosen, 
-                        'rejected':data.rejected
-                    }
-            gathered_data=fabric.all_gather_object(DATA_SHARD)
-            breakpoint()
-            gathered_data=...
+                buffer_size=len(batch_chosen_inputs['input_ids']) 
             
-            shard_progress_bar.update(1)
+            DATA={
+                'prompt':batch_prompt_inputs,
+                'chosen':batch_chosen_inputs, 
+                'rejected':batch_rejected_inputs, 
+            }
+                    
+            fabric.all_gather(DATA)
+            fabric.print(f'PROMPT DATA: {DATA["prompt"]}, INPUT_IDS: {DATA["prompt"]["input_ids"]}')
+            import sys
+            sys.exit()
+                    
+                    # breakpoint()
+                    
+                    # T = inputs_1['input_ids'].shape[1]
+                    # join_idx=2
+                    
+                    # chosen_indices=advantages.argmax(dim=1)
+                
+                    
+                    # chosen_indices_expand = chosen_indices.unsqueeze(1).expand(-1, T)
+                    # joint_inputs=join_inputs(inputs_1, inputs_2, 2) # need to gather across tensor 
+                    # breakpoint()
+                    # # chosen_inputs=torch.gather(joint_inputs, dim=2, index=chosen_indices_expand.unsqueeze(join_idx))
+                    # input_ids, attention_mask=joint_inputs.values()
+                    # chosen_inputs={
+                    #     'input_ids':torch.gather(input_ids, 
+                    #                              dim=2, 
+                    #                              index=chosen_indices_expand.unsqueeze(join_idx)
+                    #                              ).squeeze(join_idx), 
+                    #     'attention_mask':torch.gather(attention_mask, 
+                    #                                   dim=2, 
+                    #                                   index=chosen_indices_expand.unsqueeze(join_idx)
+                    #                                   ).squeeze(join_idx)
+                    #     }
+                    # breakpoint()
+                    # rejected_inputs={
+                    #     'input_ids':torch.gather(input_ids, 
+                    #                              dim=2, 
+                    #                              index=~chosen_indices_expand.unsqueeze(join_idx)
+                    #                              ).squeeze(join_idx), 
+                    #     'attention_mask':torch.gather(attention_mask, 
+                    #                                   dim=2, 
+                    #                                   index=~chosen_indices_expand.unsqueeze(join_idx)
+                    #                                   ).squeeze(join_idx)
+                    #     }
+                    # breakpoint()
+                    # prompt_inputs=agent.compile_and_tokenize(sampled_states, local_infos)['input_ids']
+                    
+                    # # joint_states=np.array([actions_1, actions_2])
+                    # # chosen=joint_states[np.arange(len(chosen_indices)), chosen_indices]
+                    # # rejected=joint_states[np.arange(len(chosen_indices)), ~chosen_indices]
+                    # # logger.debug(f'''SELECTED INDICES: {chosen_indices[:10, :]}\nJOINT_STATES:{joint_states}\nCHOSEN:{chosen}''')
+                    # steps_kept+=1
+                    
+                # except Exception as e: 
+                #     logger.info(f'PARSING ERROR ON RANK {global_rank}: {e}\nDROPPING FULL BATCH')
+                #     logger.debug(f'''PROPOSED OUTPUTS:\n{pp.pformat(agent.actor.outputs)}\n\n\n''')
+                #     continue
+                
+            #     logging.info(f'SUCCESSFULLY SELECTED BATCH OF SIZE {PER_RANK_BATCH_SIZE} ON RANK {global_rank}...ADDING')
+                
+            #     data.prompts.append(prompt_inputs)
+            #     data.chosen.append(chosen_inputs)
+            #     data.rejected.append(rejected_inputs)
+            #     breakpoint()
+            #     # buffer_size=len(unfold_list_of_lists(chosen)) 
+                
+            # global_step+=shard_step
+        
+            # logger.info(f'''GATHERING DATA FOR SHARD {shard} FOR RANK {global_rank}...TOTAL STEPS:{global_step} STEPS KEPT:{steps_kept}\n''')    
+            # fabric.barrier()
+            # DATA_SHARD={
+            #             'prompts':data.prompts, 
+            #             'chosen':data.chosen, 
+            #             'rejected':data.rejected
+            #         }
+            # gathered_data=fabric.all_gather_object(DATA_SHARD)
+            # breakpoint()
+            # gathered_data=...
+            
+            # shard_progress_bar.update(1)
 
     
     

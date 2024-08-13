@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from textwrap import dedent
 from enum import Enum
-from typing import Literal
+from typing import Literal, Union, Optional
 
 class HuggingFacePrompts(Enum): 
     
@@ -24,13 +24,12 @@ class HuggingFacePrompts(Enum):
                 {strategy}
 
                 Your final answer should be in the format of a python list
-                of moves, where each move is one of the 2 types listed above.
-                E.g. ["move forward", "turn left"]. DO NOT CHOOSE ANY OTHER TYPES OF MOVES
-                OR YOU WILL BE PUNISHED
+                of moves, where each move is one of the 2 types listed: ["move forward", "turn left"]. 
+                DO NOT CHOOSE ANY OTHER TYPES OF MOVES OR YOU WILL BE PUNISHED
 
                 All of your output must be stored in a json in the following format, and nothing else:
                 {{
-                "explain": "// Your explanation and logic goes here //"
+                "explain": "// Your explanation and logic goes here //",
                 "moves": "// Your sequence of moves goes here //"
                 }}
                 YOU ARE NOT ALLOWED TO OUTPUT ANYTHING ELSE THAT DOES NOT STRICTLY ADHERE TO THE JSON FORMAT ABOVE.
@@ -39,14 +38,16 @@ class HuggingFacePrompts(Enum):
                 An example of a correctly formatted output is this: 
                 
                 {{
-                "explain": "Since the grid size is 4 and the goal is at (4, 4) we need to move towards that bottom right position"
+                "explain": "Since the grid size is 4 and the goal is at (4, 4) we need to move towards that bottom right position",
                 "moves": ["move forward", "turn left"]
                 }}
                 
-                An example of an incorrectly formatted output is this since it is missing a closing bracket for the list of moves: 
+                An example of an incorrectly formatted output is this since it is missing a closing bracket for the list of moves, and is missing a comma in between the 'explain' and 'moves' section.
+                In addition, an incorrect move "move backward" is selected, which is not a valid move:
+                
                 {{
                 "explain": "Since the grid size is 4 and the goal is at (4, 4) we need to move towards that bottom right position"
-                "moves": ["move forward", "turn left"
+                "moves": ["move backward", "turn left"
                 }}
 
                 Here is your current position in grid world: 
@@ -69,9 +70,8 @@ class HuggingFacePrompts(Enum):
                 {strategy}
 
                 Your final answer should be in the format of a python list
-                of moves, where each move is one of the 2 types listed above.
-                E.g. ["move forward", "turn left"]. DO NOT CHOOSE ANY OTHER TYPES OF MOVES
-                OR YOU WILL BE PUNISHED
+                of moves, where each move is one of the 2 types: ["move forward", "turn left"]. 
+                DO NOT CHOOSE ANY OTHER TYPES OF MOVES OR YOU WILL BE PUNISHED
 
                 All of your output must be stored in a json in the following format, and nothing else:
                 {{
@@ -115,7 +115,7 @@ class VLLMPrompts(Enum):
                 {strategy}
 
                 Your final answer should be in the format of a python list
-                of moves, where each move is one of the 2 types listed above.
+                of moves, where each move is one of the 2 types listed below.
                 E.g. ["move forward", "turn left"]. DO NOT CHOOSE ANY OTHER TYPES OF MOVES
                 OR YOU WILL BE PUNISHED
 
@@ -159,7 +159,7 @@ class Prompts:
         'huggingface':HuggingFacePrompts
     }
     
-    backend:Literal['vllm', 'huggingface', 'langchain']
+    backend:Literal['vllm', 'huggingface']
     model_type:Literal['llama-3', 'mistral-7b']
     
     prompt:str=field(init=False) # field that depends on template_type, so init=False 
@@ -174,6 +174,44 @@ class Prompts:
             
         elif self.backend=='vllm':
             self.prompt=prompt_class.TEMPLATE.value
+            
+            
+###################### TODO: Split Prompts --> Strategy Prompt + Solver Prompt ###################
+# L1: Strategy Prompt --> Strategey ||| L2: Strategy + Output Formattter --> Action
+
+class BaseStrategies(Enum): 
+    '''Stores input prompt strategies'''
+    GRIDWORLD_STRATEGY=dedent("""\
+            You are an intelligent strategist agent that is in gridworld.
+            Come up with a plausable strategy for how you might want to navigate gridworld and
+            help you reach the goal. Your response must be some kind of move, even if you have to guess.
+            """)
+    WEI_STRATEGY=...
+    
+@dataclass 
+class StrategyPrompt: 
+    
+    '''template for holding strategy'''
+    template:str=field(
+        default='{input}'
+    )
+    
+    '''Input string for strategy; set to BaseStrategy as default'''
+    strategy:Union[BaseStrategies, str]=field(
+        default=BaseStrategies.GRIDWORLD_STRATEGY.value
+    )
+    
+    def __post_init__(self):
+        prompt_class=self.BACKEND.get(self.backend)
+        self.strategy=prompt_class.GRIDWORLD_STRATEGY.value
+        
+        if self.backend=='huggingface': 
+            self.prompt=getattr(prompt_class, self.PROMPT_MAPPING.get(self.model_type)).value
+            
+        elif self.backend=='vllm':
+            self.prompt=prompt_class.TEMPLATE.value
+        
+    
         
 if __name__=="__main__": 
     

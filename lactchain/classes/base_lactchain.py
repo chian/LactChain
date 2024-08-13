@@ -31,6 +31,10 @@
 #         self.add_component(AnotherComponent())  # Another component that follows the subchain
 
 from abc import ABC, abstractmethod
+from typing import Any, Tuple, Dict, Optional
+
+from lactchain.classes.base_generator import LLMGenerator
+from lactchain.classes.base_prompt import BasePromptTemplate
 
 class Context(ABC):
     """
@@ -86,3 +90,72 @@ class LactChain(ABC):
         for component in self.components:
             component.execute(context)
         return context
+
+class ActorChain(ABC): 
+    '''Abstract sub-chain that is meant to be a component of Lactchain
+    Plan: StrategyChain --> Parser/Mapper Chain --> Output (both classes part of Actor Chain)
+    '''
+    def __init__(self, 
+                 generator:LLMGenerator,
+                 prompt_template:BasePromptTemplate, 
+                 **kwargs
+                 ) -> None:
+        
+        self.generator = generator
+        self.prompt_template = prompt_template
+    
+    @abstractmethod    
+    def _preprocess(self, **kwargs) -> list[str]: 
+        '''
+        Function that uses the prompt template to preprocess str data into appropriate prompt template
+        '''
+
+    @abstractmethod
+    def parse_outputs(self, **kwargs) -> list[str]: 
+        '''
+        Method that parses the output prompts from the language model
+        '''
+
+    
+    @abstractmethod
+    def map_actions(self, **kwargs) -> Tuple[list[Any], list[Any]]: 
+        '''
+        Method that takes the parsed_outputs and maps them to actions
+        '''
+
+    @abstractmethod
+    def sample_actions(self, **kwargs) -> Tuple[list[str], str]:
+        '''
+        send the final prompt into the model, then get the output, runs it through parse_outputs, and then 
+        runs it through map_actions to generate a series of actions
+        '''
+
+    
+    
+class StrategyChain(ABC): 
+    '''Abstract sub-chain that is meant to be a component of Lactchain
+    Plan: StrategyChain --> Parser/Mapper Chain --> Output (both classes part of Actor Chain)
+    '''
+    def __init__(self, 
+                 generator:LLMGenerator,
+                 prompt_template:BasePromptTemplate
+                 ) -> None:
+        
+        self.generator = generator
+        self.prompt_template = prompt_template
+       
+    @abstractmethod 
+    def _preprocess() -> list[str]: 
+        '''
+        Function that uses the prompt template to preprocess str data into appropriate prompt template
+        '''
+    
+    @abstractmethod
+    def sample_strategies() -> Tuple[list[str], str]:
+        '''
+        send the final prompt into the model, then get the output, runs it through parse_outputs, and then 
+        runs it through map_actions to generate a series of actions
+        '''
+    
+
+        

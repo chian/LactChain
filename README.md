@@ -38,7 +38,7 @@ cd lactchain/train
 
 # Scripts
 ```
-# If you are running from first time 
+# If you are running from first time, these are in the lactchain/train subfolder 
 # Note: Might require some hyperparam tuning
 qsub first_run_all_gpus.pbs
 

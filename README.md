@@ -39,9 +39,9 @@ cd lactchain/train
 
 # Scripts
 ```
-# If you are running from first time, these are in the lactchain/train subfolder 
+# If you are running from first time, these are in the lactchain/train/job_scripts/vllm subfolder 
 # Note: Might require some hyperparam tuning
-qsub first_run_all_gpus.pbs
+qsub vllm_server_small_train.sh
 
 # If you are running from pretrained checkpoint
 qsub ckpt_run_all_gpus.pbs

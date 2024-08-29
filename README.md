@@ -16,7 +16,8 @@ module load conda
 # conda create -n lactchain python=3.11 -y
 # saving into a project directory is preferred
 conda create -p ../conda_envs/lactchain python=3.11 -y
-conda activate lactchain 
+#conda activate lactchain
+conda activate ../conda_envs/lactchain 
 pip install -e .
 ```
 

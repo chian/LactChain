@@ -7,10 +7,15 @@ This repo serves as a template for coding out a Reinforcement Learning (RL) syst
 ```
 # if you are on polaris, make sure to activate
 # anaconda modules via this command: 
-# module load conda/2024-04-29
+https_proxy=http://proxy.alcf.anl.gov:3128
+http_proxy=http://proxy.alcf.anl.gov:3128
+module use /soft/modulefiles/
+module load conda
 
 # make sure you are in base directory 
-conda create -n lactchain python=3.11 -y
+# conda create -n lactchain python=3.11 -y
+# saving into a project directory is preferred
+conda create -p ../conda_envs/lactchain python=3.11 -y
 conda activate lactchain 
 pip install -e .
 ```
@@ -28,7 +33,7 @@ huggingface-cli download --repo-type models --cache-dir <your_directory_path> Sa
 # Go To Working Directory: 
 ```
 # cd to train folder 
-cd latchain/train
+cd lactchain/train
 ```
 
 # Scripts

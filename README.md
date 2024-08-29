@@ -25,10 +25,10 @@ pip install -e .
 ## Download Weights Via Cli
 ```
 # download actor model
-huggingface-cli download --repo-type models --cache-dir <your_directory_path> mistralai/Mistral-7B-Instruct-v0.3 --revision 83e9aa141f2e28c82232fea5325f54edf17c43de 
+huggingface-cli download --repo-type model --cache-dir <your_directory_path> mistralai/Mistral-7B-Instruct-v0.3 --revision 83e9aa141f2e28c82232fea5325f54edf17c43de 
 
 # download critic model
-huggingface-cli download --repo-type models --cache-dir <your_directory_path> Salesforce/SFR-Embedding-Mistral
+huggingface-cli download --repo-type model --cache-dir <your_directory_path> Salesforce/SFR-Embedding-Mistral
 ```
 
 # Go To Working Directory: 

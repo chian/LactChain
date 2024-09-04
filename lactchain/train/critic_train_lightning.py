@@ -18,7 +18,7 @@ from vllm import LLM
 from lactchain.models.lightning_agent import LightningA2C
 from lactchain.models.critic import ValueFunctionConfig
 from lactchain.models.actor import ActorConfig, LoraConfigSettings, LactChain
-from lactchain.datasets.critic_dataset import CriticDataset
+from lactchain.data_handlers.critic_dataset import CriticDataset
 from lactchain.environments.grid_world import make_env, process_environment_outputs
 from lactchain.configs.base_config import BaseConfig
 from lactchain.utils.utils import configure_logger, add_inputs_to_dict, unfold_list_of_lists, filter_fake_tensors

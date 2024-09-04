@@ -7,11 +7,17 @@ This repo serves as a template for coding out a Reinforcement Learning (RL) syst
 ```
 # if you are on polaris, make sure to activate
 # anaconda modules via this command: 
-# module load conda/2024-04-29
+https_proxy=http://proxy.alcf.anl.gov:3128
+http_proxy=http://proxy.alcf.anl.gov:3128
+module use /soft/modulefiles/
+module load conda
 
 # make sure you are in base directory 
-conda create -n lactchain python=3.11 -y
-conda activate lactchain 
+# conda create -n lactchain python=3.11 -y
+# saving into a project directory is preferred
+conda create -p ../conda_envs/lactchain python=3.11 -y
+#conda activate lactchain
+conda activate ../conda_envs/lactchain 
 pip install -e .
 ```
 
@@ -19,23 +25,23 @@ pip install -e .
 ## Download Weights Via Cli
 ```
 # download actor model
-huggingface-cli download --repo-type models --cache-dir <your_directory_path> mistralai/Mistral-7B-Instruct-v0.3 --revision 83e9aa141f2e28c82232fea5325f54edf17c43de 
+huggingface-cli download --repo-type model --cache-dir <your_directory_path> mistralai/Mistral-7B-Instruct-v0.3 --revision 83e9aa141f2e28c82232fea5325f54edf17c43de 
 
 # download critic model
-huggingface-cli download --repo-type models --cache-dir <your_directory_path> Salesforce/SFR-Embedding-Mistral
+huggingface-cli download --repo-type model --cache-dir <your_directory_path> Salesforce/SFR-Embedding-Mistral
 ```
 
 # Go To Working Directory: 
 ```
 # cd to train folder 
-cd latchain/train
+cd lactchain/train
 ```
 
 # Scripts
 ```
-# If you are running from first time 
+# If you are running from first time, these are in the lactchain/train/job_scripts/vllm subfolder 
 # Note: Might require some hyperparam tuning
-qsub first_run_all_gpus.pbs
+qsub vllm_server_small_train.sh
 
 # If you are running from pretrained checkpoint
 qsub ckpt_run_all_gpus.pbs
@@ -156,6 +162,5 @@ Build out specific use cases
 5. Define example format for textblock in state class
 6. Define Policy and Value Function networks
 7. Define Actor-Critic teaching moments (TD learning? Whatever it's called)
-
 
 

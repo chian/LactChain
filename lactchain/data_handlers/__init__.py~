@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+def get_critic_dataset():
+    from .critic_dataset import CriticDataset
+    return CriticDataset
+
+#from lactchain.data_handlers.critic_dataset import CriticDataset

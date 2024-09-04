@@ -4,7 +4,8 @@ from typing import Literal
 from pydantic import Field
 from pathlib import Path
 from lactchain.configs.base_config import BaseConfig
-from lactchain.models.backends.argo_wrapper import ArgoLLM
+#from lactchain.models.backends.argo_wrapper import ArgoLLM
+from lactchain.generators.argo_wrapper import ArgoLLM
 
 class LangchainConfig(BaseConfig): 
     model:Literal['gpt-3.5-turbo', 'gpt-4', 

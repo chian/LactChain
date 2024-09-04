@@ -11,6 +11,13 @@ from lactchain.classes.base_environment import AbstractEnvironment
 from lactchain.classes.base_reward import AbstractRewardFunction
 from lactchain.configs import BaseConfig
 
+def make_env(env_id: str, config: Dict):
+    '''Make GridWorld Environment based on config'''
+    def _init():
+        env = gym.make(env_id, **config)  # Pass config parameters to the environment                                         
+        return env
+    return _init
+
 class GridWorldConfig(BaseConfig): 
     
     grid_size: int = Field(

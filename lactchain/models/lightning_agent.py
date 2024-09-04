@@ -10,9 +10,9 @@ from lactchain.models.actor import (ActorConfig, LactChain, LoraConfigSettings)
 from peft import PeftModel
 from lactchain.models.critic import (ValueFunctionConfig, ValueFunction)
 from lactchain.configs.base_config import BaseConfig
-from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator, 
-                                                           HuggingFaceGeneratorConfig, 
-                                                           LoraConfigSettings)
+from lactchain.generators.huggingface_backend import (HuggingFaceGenerator, 
+                                                      HuggingFaceGeneratorConfig, 
+                                                      LoraConfigSettings)
 
 class LightningA2C(pl.LightningModule): 
     '''Lightning Class that contains Critic and Actor Models for Lactchain style inference'''

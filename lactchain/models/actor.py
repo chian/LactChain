@@ -13,15 +13,17 @@ from lactchain.classes.base_generator import LLMGenerator
 from lactchain.classes.base_prompt import BasePromptTemplate
 from lactchain.classes.base_lactchain import LactChain, StrategyChain
 
-from lactchain.models.backends.langchain_backend import LangChainGenerator, GeneratorConfig
-from lactchain.models.backends.vllm_backend import VLLMGeneratorConfig, VLLMGenerator
-from lactchain.models.backends.huggingface_backend import (HuggingFaceGenerator, 
+#from lactchain.models.backends.langchain_backend import LangChainGenerator, GeneratorConfig
+from lactchain.generators.langchain_backend import LangChainGenerator, GeneratorConfig
+from lactchain.generators.vllm_backend import VLLMGeneratorConfig, VLLMGenerator
+from lactchain.generators.huggingface_backend import (HuggingFaceGenerator, 
                                                            HuggingFaceGeneratorConfig, 
                                                            LoraConfigSettings)
 from lactchain.models.prompts import Prompts
 ############################################################################
 
-_T = TypeVar['_T']
+#changed square brackets to parens
+_T = TypeVar('_T')
 
 class ActorConfig(BaseConfig):
     backend:Literal['langchain', 'huggingface', 'vllm']=Field('huggingface')

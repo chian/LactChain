@@ -18,7 +18,7 @@ STRATEGIES={
 }
 
 # pass in generatorconfig via .model_dump()
-def generator_factory(config: GeneratorConfigs) -> LLMGenerator:
+def generator_factory(pretrained_model_name_or_path: str, config: GeneratorConfigs) -> LLMGenerator:
     '''Generator factory that takes in config and selects 
     generator and config with the kwargs added in
     
@@ -29,6 +29,7 @@ def generator_factory(config: GeneratorConfigs) -> LLMGenerator:
     '''
     
     kwargs = config.model_dump()
+    kwargs['pretrained_model_name_or_path'] = pretrained_model_name_or_path
     
     name = kwargs.get('name', '')
     strategy = STRATEGIES.get(name)  # type: ignore[arg-type]

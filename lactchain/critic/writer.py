@@ -2,7 +2,7 @@ from __future__ import annotations
 
 '''Class that saves tokens and embeddings, and others to a dataset and merges it'''
 
-from typing import Optional
+from typing import Optional, Literal
 from pathlib import Path
 from datasets import Dataset as HFDataset, concatenate_datasets
 from tqdm import tqdm
@@ -36,16 +36,16 @@ class Writer:
     embeddings: Tensor
     
     '''
-    def __init__(self, config: HuggingFaceWriterConfig) -> None:
+    def __init__(self, num_proc: Optional[int]=None) -> None:
         """Initialize the writer with the configuration."""
-        self.config = config
+        self.num_proc = num_proc
 
     def write(
         self,
         output_dir: Path,
-        paths: list[str],
-        text: list[str],
-        responses: list[str],
+        rewards: list[str],
+        observations: list[str],
+        infos: list[str]
     ) -> None:
         """Write the embeddings to disk.
 
@@ -63,9 +63,9 @@ class Writer:
         # Create a dataset
         dataset = HFDataset.from_dict(
             mapping={
-                'path': paths,
-                'text': text,
-                'response': responses,
+                'rewards':rewards,
+                'observations': observations,
+                'infos': infos,
             },
         )
 
@@ -97,4 +97,4 @@ class Writer:
         dataset = concatenate_datasets(all_datasets)
 
         # Write the dataset to disk
-        dataset.save_to_disk(output_dir, num_proc=self.config.num_proc)
+        dataset.save_to_disk(output_dir, num_proc=self.num_proc)

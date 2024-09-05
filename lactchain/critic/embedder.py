@@ -174,7 +174,8 @@ class EmbedderFunction(nn.Module):
 
         return pred_q_values  # shape B x 1
     
-    
+
+
 
     # @torch.inference_mode()
     # def compile_and_tokenize(self,

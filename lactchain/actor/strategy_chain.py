@@ -67,6 +67,6 @@ class StrategyChain(StrategyChain):
         
         prompts = self._preprocess(environment_or_task)
         outputs = self.generator.generate(prompts)
-        
+       
         return outputs
 

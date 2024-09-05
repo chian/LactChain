@@ -69,13 +69,13 @@ def get_action_solver(config: PromptTemplateConfigs) -> ActionSolver:
     
     kwargs = config.model_dump()
     
-    name = kwargs.get('name', '')
-    strategy = PROMPT_TEMPLATES.get(name)
+    solver = kwargs.get('solver', '')
+    strategy = ACTION_SOLVERS.get(solver)
     if not strategy:
         raise ValueError(
-            f'Unknown prompt name: {name}.'
-            f' Available: {set(PROMPT_TEMPLATES.keys())}',
+            f'Unknown prompt name: {solver}.'
+            f' Available: {set(ACTION_SOLVERS.keys())}',
         )
 
-    cls = strategy
+    cls = strategy()
     return cls

@@ -72,22 +72,23 @@ class ActorChain(ActorChain):
             
         return prompts
         
-    def parse_outputs(self, outputs:list[str]) -> list[str]:
+    def parse_outputs(self, outputs:list[str]) -> Tuple[list[str], list[str]]:
         '''Loops through the list of outputs and json parses them to return a list of 
         processed strings
         '''
-        parsed_outputs=[]
+        parsed_explanations=[]
+        parsed_moves=[]
         for _, output in enumerate(outputs):
-            parsed_outputs.append(json.loads(output))
-            
-        return parsed_outputs
+            parsed_explanations.append(json.loads(output)['explain'])
+            parsed_moves.append(json.loads(output)['moves'])
+
+        return parsed_explanations, parsed_moves
         
-    def map_actions(self, batch_actions:list[str]) -> list[np.ndarray]: 
+    def map_actions(self, batch_moves:list[str]) -> list[np.ndarray]: 
         '''Helper function that maps list of processed outputs from llm into binary actions 
         as a list of arrays
         '''
-        
-        batch_mapped_actions = self.solver.convert(batch_actions)
+        batch_mapped_actions = self.solver.convert(batch_moves)
             
         return batch_mapped_actions
     
@@ -104,9 +105,9 @@ class ActorChain(ActorChain):
                                    infos=infos)
         
         outputs = self.generator.generate(prompts)
-        parsed = self.parse_outputs(outputs)
-        actions = self.map_actions(parsed)
-        
+        explanations, moves = self.parse_outputs(outputs)
+        actions = self.map_actions(moves)
+
         return actions
     
     

@@ -117,6 +117,7 @@ class VectorizedGridWorld(gym.Env):
         # done = (self.state['x'], self.state['y']) == self.goal_position
         done = (self.state['x'], self.state['y']) == (0, 0)
         truncated = False  # set your own condition for truncated if needed
+        
         return self.state, total_reward, done, truncated, {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}
     
     # {'info': f'Grid is size {self.grid_size}, goal position is at {self.goal_position}'}

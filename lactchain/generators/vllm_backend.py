@@ -27,7 +27,7 @@ class VLLMGeneratorConfig(BaseConfig):
     # Whether to use beam search
     use_beam_search: bool = False
     # The number of GPUs to use
-    tensor_parallel_size: int = 2
+    tensor_parallel_size: int = 1
     # pretrained model name or path
     pretrained_model_name_or_path: str = None
     # percentage of gpu to utilize

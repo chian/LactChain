@@ -17,18 +17,22 @@ class StrategyPromptTemplate:
     """Question answer prompt template."""
 
     template_with_context: str = dedent('''
+                <s>[INST]
                 You are an intelligent strategist agent. You will be given a overall task / environment / world that you have to solve.
                 Come up with a plausable strategy for how you might want to navigate or solve your environment and
                 help you reach the goal. Your response must be some kind of strategy or thinking style, even if you have to guess
                 
                 Environment or Task: 
                 {environment_or_task}
+                [/INST]
                 ''')
 
     template_no_context: str = dedent('''
+                <s>[INST]
                 You are an intelligent strategist agent. You will be given a overall task / environment / world that you have to solve.
                 Come up with a plausable strategy for how you might want to navigate or solve your environment and
                 help you reach the goal. Your response must be some kind of strategy, even if you have to guess
+                [/INST]
                 ''')
 
     def __init__(self, config: StrategyPromptTemplateConfig) -> None:

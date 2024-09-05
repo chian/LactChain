@@ -13,6 +13,7 @@ from lactchain.configs.base_config import BaseConfig
 class ActionsPromptTemplateConfig(BaseConfig):
     """Configuration for the StrategyPromptTemplate"""
     name: Literal['action'] = 'action'  # type: ignore[assignment]
+    solver: Literal['gridworld'] = 'gridworld'
     
 class ActionSolver: 
     '''Class used to map llm outputs to actions for environment'''
@@ -22,29 +23,28 @@ class ActionSolver:
         'turn left':1
         }
     
-    def convert(self, actions: str | list[str]) -> np.ndarray: 
+    def convert(self, batch_moves: str | list[str]) -> np.ndarray: 
         '''Converts a batch of action strings to their array actions'''
-        
-        if isinstance(actions, str): 
-            actions = [actions]
-            
+
+        if isinstance(batch_moves, str): 
+            batch_moves = [batch_moves]
+
         batch_mapped_actions=[]
-        for idx, actions in enumerate(actions):
+        for idx, moves in enumerate(batch_moves):
             mapped_actions=np.array(
-                [self.action_map.get(action) for action in actions]
+                [self.action_map.get(move) for move in moves]
                 )
-            
             for action in mapped_actions: 
                 assert action in [0, 1], f'MAP ACTION ERROR: {action} AT {idx}, ACTION MUST BE [0, 1]'
-                
             batch_mapped_actions.append(mapped_actions)
-        
+            
         return batch_mapped_actions
     
 class ActionPromptTemplate:
     """Question answer prompt template."""
 
     template_with_context: str = dedent("""\
+                <s>[INST]
                 There are only 2 types of moves you can make:
 
                 1. move forward
@@ -86,10 +86,12 @@ class ActionPromptTemplate:
                 {state}
                 Here is some extra information of grid world: 
                 {info}
+                [/INST]
                 """)
         
 
     template_no_context: str = dedent("""\
+                <s>[INST]
                 There are only 2 types of moves you can make:
 
                 1. move forward
@@ -126,6 +128,7 @@ class ActionPromptTemplate:
                 }}
                 
                 Since you have no information, make an educated guess!
+                [/INST]
                 """)
         
 

@@ -17,14 +17,6 @@ def make_env(env_id: str, config: Dict):
         return env
     return _init
 
-# def make_gridworld_env(config: GridWorldConfig):
-#     '''Make GridWorld Environment based on config'''
-    
-#     def _init():
-#         env = VectorizedGridWorld(config)  # Pass config parameters to the environment
-#         return env
-
-#     return _init
 
 def build_gridworld_env(config: GridWorldConfig):
     '''Make GridWorld Environment based on config'''

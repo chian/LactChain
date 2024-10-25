@@ -163,4 +163,147 @@ Build out specific use cases
 6. Define Policy and Value Function networks
 7. Define Actor-Critic teaching moments (TD learning? Whatever it's called)
 
+@startuml
+actor User
+
+' Participants
+participant "User Code" as UC
+participant ARGO_LLM
+participant ArgoWrapper
+participant ArgoEmbeddingWrapper
+participant "Argo API"
+participant ARGO_EMBEDDING
+participant State
+participant InputDict
+participant "Embedding Model"
+participant LactChain
+participant AbstractEnvironment
+participant GymEnv
+
+note over User,UC: User interacts with the system
+
+== ARGO_LLM Interaction ==
+
+User -> UC: Instantiate ARGO_LLM
+UC -> ARGO_LLM: __init__()
+activate ARGO_LLM
+
+note right of ARGO_LLM: Initializes with default parameters
+
+UC -> ARGO_LLM: _call(prompt)
+activate ARGO_LLM
+
+ARGO_LLM -> ARGO_LLM: _get_model_default_parameters()
+ARGO_LLM -> ArgoWrapper: invoke(prompt)
+activate ArgoWrapper
+
+ArgoWrapper -> ArgoWrapper: Prepare headers and data
+ArgoWrapper -> json: dumps(data)
+ArgoWrapper -> requests: post(url, headers, data_json)
+activate requests
+
+requests -> "Argo API": POST /chat/ with data
+activate "Argo API"
+
+"Argo API" --> requests: Response
+deactivate "Argo API"
+
+requests --> ArgoWrapper: response
+deactivate requests
+
+ArgoWrapper -> json: loads(response.text)
+ArgoWrapper -> ARGO_LLM: parsed response
+deactivate ArgoWrapper
+
+ARGO_LLM -> ARGO_LLM: Extract response
+ARGO_LLM --> UC: Return generated text
+deactivate ARGO_LLM
+
+== ARGO_EMBEDDING Interaction ==
+
+UC -> ARGO_EMBEDDING: __init__(argo_wrapper)
+activate ARGO_EMBEDDING
+
+UC -> ARGO_EMBEDDING: embed_query(query)
+activate ARGO_EMBEDDING
+
+ARGO_EMBEDDING -> ARGO_EMBEDDING: _call(query)
+ARGO_EMBEDDING -> ArgoEmbeddingWrapper: invoke(query)
+activate ArgoEmbeddingWrapper
+
+ArgoEmbeddingWrapper -> ArgoEmbeddingWrapper: Prepare headers and data
+ArgoEmbeddingWrapper -> json: dumps(data)
+ArgoEmbeddingWrapper -> requests: post(url, headers, data_json)
+activate requests
+
+requests -> "Argo API": POST /embed/ with data
+activate "Argo API"
+
+"Argo API" --> requests: Response
+deactivate "Argo API"
+
+requests --> ArgoEmbeddingWrapper: response
+deactivate requests
+
+ArgoEmbeddingWrapper -> json: loads(response.text)
+ArgoEmbeddingWrapper --> ARGO_EMBEDDING: parsed response
+deactivate ArgoEmbeddingWrapper
+
+ARGO_EMBEDDING --> UC: Return embedding
+deactivate ARGO_EMBEDDING
+
+== State and LactChain Interaction ==
+
+UC -> State: Instantiate State(embedding_model, textblock)
+activate State
+
+State -> InputDict: __init__()
+activate InputDict
+InputDict --> State: Initialize dictionary
+deactivate InputDict
+
+State -> State: __call__()
+activate State
+
+State -> "Embedding Model": invoke(textblock)
+activate "Embedding Model"
+"Embedding Model" --> State: embedding
+deactivate "Embedding Model"
+
+State --> UC: embedding
+deactivate State
+
+UC -> LactChain: Instantiate LactChain(state)
+activate LactChain
+
+LactChain -> State: Store state
+deactivate LactChain
+
+UC -> LactChain: transition(action)
+activate LactChain
+
+LactChain -> LactChain: Apply action to state
+LactChain -> State: Update state
+deactivate LactChain
+
+== AbstractEnvironment Interaction ==
+
+UC -> AbstractEnvironment: Instantiate
+activate AbstractEnvironment
+AbstractEnvironment -> GymEnv: __init__()
+deactivate AbstractEnvironment
+
+UC -> AbstractEnvironment: reset()
+activate AbstractEnvironment
+AbstractEnvironment --> UC: initial observation
+deactivate AbstractEnvironment
+
+UC -> AbstractEnvironment: step(action)
+activate AbstractEnvironment
+AbstractEnvironment -> LactChain: Apply action
+AbstractEnvironment -> AbstractEnvironment: Compute reward
+AbstractEnvironment --> UC: observation, reward, done, info
+deactivate AbstractEnvironment
+
+@enduml
 

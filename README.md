@@ -163,6 +163,8 @@ Build out specific use cases
 6. Define Policy and Value Function networks
 7. Define Actor-Critic teaching moments (TD learning? Whatever it's called)
 
+## System Sequence Diagram
+
 @startuml
 actor User
 

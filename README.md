@@ -164,7 +164,7 @@ Build out specific use cases
 7. Define Actor-Critic teaching moments (TD learning? Whatever it's called)
 
 ## System Sequence Diagram
-
+```bash
 @startuml
 actor User
 
@@ -308,4 +308,4 @@ AbstractEnvironment --> UC: observation, reward, done, info
 deactivate AbstractEnvironment
 
 @enduml
-
+```
